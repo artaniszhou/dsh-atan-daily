@@ -1,0 +1,54 @@
+/** 编辑弹窗：调度输入、单选、时区组合框。 */
+.editRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.editField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.scheduleLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.radioGroup {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 14px;
+}
+.radioLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+.radio {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--dsw-alias-state-business-primary);
+  cursor: pointer;
+}
+
+/* 时区组合框的样式在 `ui/kit.module.css`（控件被新建与编辑共用）。 */
+.formError {
+  margin: 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+@media (max-width: 520px) {
+  .editRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

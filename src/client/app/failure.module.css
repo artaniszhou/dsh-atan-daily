@@ -1,0 +1,20 @@
+/** 渲染崩溃时的兜底界面。 */
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 24px;
+  padding: 16px;
+  border: 0.5px solid var(--dsw-alias-state-error-primary);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+}
+.detail {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}

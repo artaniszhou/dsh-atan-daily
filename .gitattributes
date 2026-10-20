@@ -1,0 +1,12 @@
+# Normalize text files to LF so the TypeScript sources and the report templates
+# stay byte-identical across platforms.
+* text=auto eol=lf
+
+# Binary assets must never be normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

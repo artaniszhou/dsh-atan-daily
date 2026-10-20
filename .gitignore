@@ -1,0 +1,33 @@
+# Build output is produced by `npm run build` and only shipped inside the npm
+# tarball, where `prepack` builds it. The repository is not installed from Git,
+# so lib/ stays out of version control.
+lib/
+
+# Internal design notes and reviews stay local; only README.md and the product
+# document are published.
+docs/
+
+node_modules/
+npm-debug.log*
+*.tsbuildinfo
+
+# Scratch output produced by task runs, not part of the plugin package.
+output/
+
+# Local npm pack output.
+*.tgz
+
+# Local environment and secrets. Never commit real credentials.
+.env
+.env.*
+!.env.example
+
+# Logs and tool caches.
+*.log
+.cache/
+
+# Editor and OS clutter.
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

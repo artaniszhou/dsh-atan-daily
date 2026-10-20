@@ -1,0 +1,30 @@
+# Inserts the Host half of Atan Daily (阿碳日报) into the profile whenever this
+# bundle is enabled.
+#
+# Fields (all optional):
+#   dataDir            the plugin's initial working directory, where task
+#                      folders live. It is also the working directory (cwd) a
+#                      run's Session gets — the two are one concept here.
+#                      default: $DSH_HOME/plugin-data/atan-daily
+#                      NOTE: the page's 「工作目录」 area saves its own choice in
+#                      $DSH_HOME/plugin-data/atan-daily/settings.json and takes
+#                      precedence over this.
+#   runTimeoutSeconds  bound on one unattended run (default 1800)
+#   historyDays        default days of run history for new tasks
+#                      (default 7; 0 = keep all). Each task can override it.
+#
+# Override this row by id in a profile's own cordis.patch.yml — a matching
+# override replaces the whole `config`, so restate the fields you still want:
+#
+#   - id: atan-daily
+#     config:
+#       dataDir: !!js dshHomePath('plugin-data/atan-daily')
+#       runTimeoutSeconds: 900
+#       historyDays: 14
+#
+# The page lives in the Client half (src/client/index.tsx -> lib/client.js); this
+# Host row owns persistence, scheduling, and execution (lib/host/plugin.js).
+- insert:
+    - id: atan-daily
+      name: 'dsh-atan-daily'
+      config: {}

@@ -1,0 +1,85 @@
+{
+  "name": "dsh-atan-daily",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness plugin: scheduled collection tasks that each file a timestamped report.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "scheduled-tasks",
+    "reports"
+  ],
+  "author": "Artanis Zhou",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/artaniszhou/dsh-atan-daily.git"
+  },
+  "homepage": "https://github.com/artaniszhou/dsh-atan-daily#readme",
+  "bugs": {
+    "url": "https://github.com/artaniszhou/dsh-atan-daily/issues"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib/**/*.js",
+    "template/**/*.md",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-0 <0.3.0"
+  },
+  "scripts": {
+    "build": "npm run typecheck && npm run clean && npm run build:host && npm run build:client",
+    "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
+    "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "build:host": "tsc -p tsconfig.host.json",
+    "build:client": "tsdown",
+    "watch": "tsdown --watch",
+    "test": "npm run typecheck && npm run typecheck:test && vitest run",
+    "test:unit": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "node scripts/smoke-client.mjs",
+    "smoke:host": "node scripts/smoke-host.mjs",
+    "check": "npm test && npm run build && npm run smoke && npm run smoke:host",
+    "prepack": "npm run build"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.10.2",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.1",
+    "jsdom": "^29.1.1",
+    "lightningcss": "^1.33.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

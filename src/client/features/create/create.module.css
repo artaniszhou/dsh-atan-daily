@@ -1,0 +1,25 @@
+/** 新建任务表单。 */
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-bg-layer-1);
+}
+.fullField {
+  flex-basis: 100%;
+}
+.formActions {
+  display: inline-flex;
+  gap: 8px;
+}
+.formError {
+  flex-basis: 100%;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
