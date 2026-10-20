@@ -8,7 +8,7 @@
 
 **把选题变成按计划自动执行的日报，每期一份带时间戳的报告**
 
-[产品文档](产品文档.md) · [MIT](LICENSE)
+[MIT](LICENSE)
 
 [![许可证：MIT](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-MIT-green.svg)](LICENSE)
 [![npm package](https://img.shields.io/npm/v/dsh-atan-daily.svg?label=npm%20package)](https://www.npmjs.com/package/dsh-atan-daily)
@@ -20,7 +20,7 @@
 
 > 阿碳日报是社区维护的 DeepSeek Harness（DSH）插件，并非 DeepSeek AI 官方产品。
 
-本文描述 **1.0.0**。目录结构、Host 接口、配置项与发布流程见[产品文档](产品文档.md)。
+本文描述 **1.0.0**，涵盖功能、安装、使用方式与任务目录结构。
 
 ## 功能概览
 
@@ -160,7 +160,7 @@ npm run build  # 构建 lib/
 npm run check  # test + build + 两个 smoke，提交前跑一遍
 ```
 
-界面文案同时维护 `locale/zh.json` 与 `locale/en.json`，两边键集合需一致；颜色只用 `--dsw-*` 语义令牌，不要引入独立调色板。架构细节、HTTP 接口与数据格式见[产品文档](产品文档.md)，欢迎提交改进。
+界面文案同时维护 `locale/zh.json` 与 `locale/en.json`，两边键集合需一致；颜色只用 `--dsw-*` 语义令牌，不要引入独立调色板。欢迎提交改进。
 
 ## 许可证
 
