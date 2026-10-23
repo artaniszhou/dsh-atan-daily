@@ -25,6 +25,7 @@ output/
 # Logs and tool caches.
 *.log
 .cache/
+.playwright-mcp/
 
 # Editor and OS clutter.
 .idea/

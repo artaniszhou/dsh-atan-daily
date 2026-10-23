@@ -63,6 +63,7 @@ describe('createTask', () => {
     })
     expect(created.id).toBe('A股 银行')
     expect((await stat(join(dir, 'A股 银行', 'meta', 'rule.md'))).isFile()).toBe(true)
+    expect((await stat(join(dir, 'A股 银行', 'history'))).isDirectory()).toBe(true)
     const [row] = await store.list()
     expect(row?.cron).toBe('0 9 * * *')
     expect(row?.enabled).toBe(true)

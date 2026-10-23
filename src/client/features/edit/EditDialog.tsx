@@ -11,7 +11,7 @@ import type { AtanDailyApi } from '../../api/tasks.ts'
 import { t } from '../../i18n/index.ts'
 import { Dialog } from '../../ui/dialog.tsx'
 import { Button, Field, TextInput } from '../../ui/primitives.tsx'
-import { TimeZoneField } from '../../ui/timezone-field.tsx'
+import { isValidTimeZone, TimeZoneField } from '../../ui/timezone-field.tsx'
 import { draftOf, parseHistoryDays, schedulePatch } from './schedule.ts'
 import css from './edit.module.css'
 
@@ -54,6 +54,10 @@ export function EditDialog({ api, task, onClose, onSaved }: EditDialogProps) {
     const scheduleResult = schedulePatch({ mode, value })
     if (!scheduleResult.ok) {
       setError(t(scheduleResult.error))
+      return
+    }
+    if (!isValidTimeZone(zone)) {
+      setError(t('timeZoneInvalid'))
       return
     }
     setSaving(true)
@@ -118,6 +122,9 @@ export function EditDialog({ api, task, onClose, onSaved }: EditDialogProps) {
           </div>
         </div>
         <span className={css.radioLabel}>{hint}</span>
+        {mode === 'manual'
+          ? <span className={css.manualNote}>{t('scheduleManualNote')}</span>
+          : null}
       </div>
 
       <div className={css.editRow}>

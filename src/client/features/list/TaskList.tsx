@@ -2,10 +2,10 @@
  * 列表区域：统计条 + 搜索 + 任务行 + 分页。
  *
  * 它只负责“怎么显示”和本地的搜索/翻页状态；数据从 `useTaskList` 传入，
- * 行操作原样回抛给页面。
+ * 行操作原样回抛给页面。推送入口在每张卡片的右下角，见 `TaskRow`。
  */
 import { useEffect, useState, type ReactNode } from 'react'
-import type { TaskRecord } from '../../../protocol.ts'
+import type { BotView, TaskRecord } from '../../../protocol.ts'
 import { AUTO_RETRY_LIMIT, PAGE_SIZE } from '../../constants.ts'
 import { t } from '../../i18n/index.ts'
 import { IconEmpty } from '../../ui/icons.tsx'
@@ -37,6 +37,10 @@ export interface TaskListProps {
   onHistory: (task: TaskRecord) => void
   onEdit: (task: TaskRecord) => void
   onRemove: (task: TaskRecord) => void
+  /** 全部机器人；任务卡片右下角的图标据此解析。 */
+  bots: BotView[]
+  /** 打开某个任务的「推送机器人」抽屉。 */
+  onManagePush: (task: TaskRecord) => void
 }
 
 /** 列表区域。 */
@@ -44,6 +48,7 @@ export function TaskList(props: TaskListProps) {
   const {
     tasks, phase, error, autoRetries, resetSignal, onRetry, onCreate,
     onRun, onToggle, onOpen, onHistory, onEdit, onRemove,
+    bots, onManagePush,
   } = props
   /** 搜索词；变化时回到第一页。 */
   const [search, setSearch] = useState<string>('')
@@ -101,12 +106,14 @@ export function TaskList(props: TaskListProps) {
           <TaskRow
             key={task.id}
             task={task}
+            bots={bots}
             onRun={() => { onRun(task) }}
             onToggle={() => { onToggle(task) }}
             onOpen={() => { onOpen(task) }}
             onHistory={() => { onHistory(task) }}
             onEdit={() => { onEdit(task) }}
             onRemove={() => { onRemove(task) }}
+            onManagePush={() => { onManagePush(task) }}
           />
         ))}
       </ul>

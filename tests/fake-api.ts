@@ -23,6 +23,25 @@ export function fakeApi(overrides: Partial<AtanDailyApi> = {}): AtanDailyApi {
       savedWorkDir: workDir ?? '',
     })),
     createDirectory: vi.fn(async () => settings()),
+    loadBots: vi.fn(async () => ({ bots: [], provisioning: null })),
+    beginFeishuProvision: vi.fn(async () => ({
+      attemptId: 'attempt-1',
+      state: 'waiting' as const,
+      qrCodeDataUrl: 'data:image/png;base64,AAAA',
+      expiresAt: Date.now() + 300_000,
+      pollIntervalMs: 1500,
+    })),
+    pollProvision: vi.fn(async () => ({
+      attemptId: 'attempt-1',
+      state: 'connected' as const,
+      pollIntervalMs: 1500,
+    })),
+    cancelProvision: vi.fn(async () => ({
+      attemptId: 'attempt-1',
+      state: 'cancelled' as const,
+      pollIntervalMs: 1500,
+    })),
+    removeBot: vi.fn(async () => ({ bots: [], provisioning: null })),
     ...overrides,
   }
 }

@@ -102,16 +102,22 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
   return <textarea ref={ref} className={cx(css.textarea, className)} {...rest} />
 })
 
-/** 滑动开关；真正的 checkbox，键盘可操作。 */
-export function Switch({ checked, disabled = false, label, onChange }: {
+/** 滑动开关；真正的 checkbox，键盘可操作。`tone` 只影响开启态的颜色。 */
+export function Switch({ checked, disabled = false, label, onChange, tone = 'primary' }: {
   checked: boolean
   disabled?: boolean
   label: string
   onChange: (next: boolean) => void
+  tone?: 'primary' | 'success'
 }) {
   return (
     <label
-      className={cx(css.switch, checked && css.switchOn, disabled && css.switchDisabled)}
+      className={cx(
+        css.switch,
+        checked && css.switchOn,
+        checked && tone === 'success' && css.switchOnSuccess,
+        disabled && css.switchDisabled,
+      )}
       title={label}
       aria-label={label}
     >

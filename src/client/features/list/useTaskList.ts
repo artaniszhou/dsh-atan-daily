@@ -45,6 +45,10 @@ export interface TaskListController {
   create: (input: CreateTaskInput) => Promise<TaskRecord>
   run: (task: TaskRecord) => void
   toggle: (task: TaskRecord) => void
+  /** 改推送目标；清空目标会同时关掉推送开关。 */
+  setPushTargets: (task: TaskRecord, botIds: string[]) => void
+  /** 只开关推送，目标不变。 */
+  setPushEnabled: (task: TaskRecord, enabled: boolean) => void
   remove: (task: TaskRecord) => void
   openSession: (task: TaskRecord) => void
   /** 新建成功后插入到列表头。 */
@@ -138,6 +142,30 @@ export function useTaskList(api: AtanDailyApi, options: TaskListOptions): TaskLi
     })
   }, [api, mark])
 
+  /** 推送目标与开关一起落盘：先乐观更新，失败回滚并写回行内错误。 */
+  const applyPush = useCallback((task: TaskRecord, botIds: string[], enabled: boolean): void => {
+    const previous = { pushBotIds: task.pushBotIds, pushEnabled: task.pushEnabled }
+    mark(task.id, { pushBotIds: botIds, pushEnabled: enabled })
+    void api.patchTask(task.id, { pushBotIds: botIds, pushEnabled: enabled }).then((updated) => {
+      setTasks(previousTasks => previousTasks.map(item => (item.id === updated.id ? updated : item)))
+    }).catch((failure: unknown) => {
+      mark(task.id, { ...previous, lastError: hostErrorText(failure, t) })
+    })
+  }, [api, mark])
+
+  const setPushTargets = useCallback((task: TaskRecord, botIds: string[]): void => {
+    // 清空目标必须关掉开关；新选中一个机器人则顺手打开，避免"选了却不发"。
+    const added = botIds.length > task.pushBotIds.length
+    const enabled = botIds.length === 0 ? false : added ? true : task.pushEnabled
+    applyPush(task, botIds, enabled)
+  }, [applyPush])
+
+  const setPushEnabled = useCallback((task: TaskRecord, enabled: boolean): void => {
+    // 没有目标时打开开关没有意义，也不该落盘。
+    if (enabled && task.pushBotIds.length === 0) return
+    applyPush(task, task.pushBotIds, enabled)
+  }, [applyPush])
+
   const remove = useCallback((task: TaskRecord): void => {
     if (!confirm(`${t('removeConfirm')}\n\n${task.name}`)) return
     void api.deleteTask(task.id).then(() => {
@@ -165,6 +193,8 @@ export function useTaskList(api: AtanDailyApi, options: TaskListOptions): TaskLi
     create: input => api.createTask(input),
     run,
     toggle,
+    setPushTargets,
+    setPushEnabled,
     remove,
     openSession,
     prepend: task => { setTasks(previous => [task, ...previous]) },

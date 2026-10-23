@@ -58,7 +58,9 @@ export interface HostErrorDescriptor {
 export function describeHostError(error: unknown): HostErrorDescriptor {
   if (error instanceof HostError) {
     if (error.code === 'network') {
-      return { key: 'errorNetwork', detail: error.detail !== '' ? error.detail : error.message }
+      // 浏览器给的是 "Failed to fetch" 这类实现文案，对用户没有信息量，
+      // 只保留本地化的「无法连接 Host」；真正的排查细节看 Host 日志。
+      return { key: 'errorNetwork', detail: '' }
     }
     if (error.code === 'timeout') return { key: 'errorTimeout', detail: '' }
     if (error.code === 'invalid-response') return { key: 'errorInvalidResponse', detail: error.message }

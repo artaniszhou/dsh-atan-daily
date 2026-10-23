@@ -99,6 +99,18 @@ export interface ApprovalPort {
   setPolicy: (agent: unknown, policy: 'ask' | 'never') => void
 }
 
+/**
+ * 凭据库端口。
+ *
+ * 只暴露"读/写/删"三个动作：配置里永远只出现 key（`secretRef`），
+ * secret 本身由宿主的凭据库托管，不进 `settings.json` 或 `bots.json`。
+ */
+export interface CredentialsPort {
+  resolve: (ref: string) => Promise<{ value: string } | undefined>
+  set: (ref: string, value: string) => Promise<void>
+  unset: (ref: string) => Promise<void>
+}
+
 /** 定时器端口。 */
 export interface TimerPort {
   timeout: (callback: () => void, delay: number) => () => void

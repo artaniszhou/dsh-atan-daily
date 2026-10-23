@@ -25,6 +25,8 @@ function meta(overrides: Partial<TaskMeta> = {}): TaskMeta {
     timeZone: 'UTC',
     enabled: false,
     historyDays: 7,
+    pushBotIds: [],
+    pushEnabled: false,
     sessionId: null,
     lastRunAt: null,
     lastStatus: null,
@@ -126,5 +128,19 @@ describe('TaskListStore', () => {
     expect(row?.timeZone).toBe(new Intl.DateTimeFormat().resolvedOptions().timeZone)
     expect(row?.cron).toBeNull()
     expect(row?.enabled).toBe(false)
+  })
+
+  it('把旧的单个 pushBotId 读成 pushBotIds 数组，并清洗非法项', async () => {
+    const dir = await tempDir()
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'task-list.jsonl'), [
+      JSON.stringify({ ...meta({ id: 't1' }), pushBotIds: undefined, pushBotId: 'fs_old' }),
+      JSON.stringify({ ...meta({ id: 't2' }), pushBotIds: ['fs_a', 'fs_a', '  ', 'bad id!', 'fs_b'] }),
+    ].join('\n') + '\n', 'utf8')
+
+    const store = new TaskListStore(dir, { defaultHistoryDays: 7 })
+    const rows = await store.list()
+    expect(rows.find(row => row.id === 't1')?.pushBotIds).toEqual(['fs_old'])
+    expect(rows.find(row => row.id === 't2')?.pushBotIds).toEqual(['fs_a', 'fs_b'])
   })
 })

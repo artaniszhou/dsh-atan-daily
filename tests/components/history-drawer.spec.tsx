@@ -34,6 +34,18 @@ describe('HistoryDrawer', () => {
     expect(await screen.findByText('还没有运行记录。')).toBeTruthy()
   })
 
+  it('保留期说明跟随任务设置：按天数或永久', async () => {
+    const api = fakeApi({ listRuns: vi.fn(async () => []) })
+    const { unmount } = render(
+      <HistoryDrawer api={api} task={task({ historyDays: 9 })} onClose={vi.fn()} onOpenSession={vi.fn()} />,
+    )
+    expect(await screen.findByText(/运行记录保留 9 天/)).toBeTruthy()
+    unmount()
+
+    render(<HistoryDrawer api={api} task={task({ historyDays: 0 })} onClose={vi.fn()} onOpenSession={vi.fn()} />)
+    expect(await screen.findByText(/运行记录永久保留/)).toBeTruthy()
+  })
+
   it('加载失败显示原因与重试', async () => {
     const api = fakeApi({ listRuns: vi.fn(async () => { throw new Error('offline') }) })
     render(<HistoryDrawer api={api} task={task()} onClose={vi.fn()} onOpenSession={vi.fn()} />)

@@ -15,6 +15,8 @@ export const ROUTE = HOST_ROUTES.tasks
 export const SETTINGS_ROUTE = HOST_ROUTES.settings
 /** 任务目录里承载规则、缓存、脚本与运行记录的子目录。 */
 export const META_DIR = 'meta'
+/** 与 `meta/` 同级：归档更早的报告，任务根只留最新一份。 */
+export const HISTORY_DIR = 'history'
 /** `meta/` 下的规则文件名。 */
 export const RULE_NAME = 'rule.md'
 /** `meta/` 下的缓存目录。 */
@@ -30,7 +32,7 @@ export const DEFAULT_RUN_TIMEOUT_SECONDS = 1800
 /** 运行历史的默认保留天数。 */
 export const DEFAULT_HISTORY_DAYS = 7
 /** 展示/存储的插件版本；与 package.json 保持同步。 */
-export const PLUGIN_VERSION = '1.0.0'
+export const PLUGIN_VERSION = '1.1.0'
 /** 超过此值的等待改为重新武装，对齐 32 位有符号定时器上限。 */
 export const MAX_TIMER_DELAY_MS = 2_147_483_647
 /** 新会话被 prompt 后，等待回合开始的上限。 */

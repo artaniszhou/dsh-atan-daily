@@ -43,6 +43,10 @@ export interface TaskMeta {
   timeZone: string
   enabled: boolean
   historyDays: number
+  /** 运行成功后把报告发到哪些 IM 机器人；空数组表示没有目标。 */
+  pushBotIds: string[]
+  /** 推送开关：关掉保留目标但暂停发送。 */
+  pushEnabled: boolean
   sessionId: string | null
   lastRunAt: string | null
   lastStatus: RunStatus | null
@@ -61,6 +65,8 @@ export interface TaskMetaPatch {
   timeZone?: string
   enabled?: boolean
   historyDays?: number
+  pushBotIds?: string[]
+  pushEnabled?: boolean
   sessionId?: string | null
   lastRunAt?: string | null
   lastStatus?: RunStatus | null
@@ -160,6 +166,26 @@ function parseLegacyMarkdown(text: string): string[] {
 }
 
 /**
+ * Normalize the push target list.
+ *
+ * Accepts the v2 array, and the earlier single `pushBotId` string so old rows
+ * keep their target after the field was widened to a list.
+ * @param value - raw field value.
+ * @returns unique, trimmed bot ids in their original order.
+ */
+function normalizeBotIds(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+  const ids: string[] = []
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const id = item.trim()
+    if (id === '' || !/^[A-Za-z0-9_-]{1,64}$/u.test(id) || ids.includes(id)) continue
+    ids.push(id)
+  }
+  return ids
+}
+
+/**
  * Normalize one parsed row, filling defaults for fields introduced in v2.
  * @param row - parsed JSON.
  * @param fallbackHistoryDays - default retention.
@@ -194,6 +220,8 @@ function normalizeRow(
     timeZone: typeof row.timeZone === 'string' && isKnownTimeZone(row.timeZone) ? row.timeZone : hostTimeZone(),
     enabled: normalizedMode === 'manual' ? false : row.enabled !== false,
     historyDays,
+    pushBotIds: normalizeBotIds(row.pushBotIds ?? (row as { pushBotId?: unknown }).pushBotId),
+    pushEnabled: row.pushEnabled === true,
     sessionId: typeof row.sessionId === 'string' ? row.sessionId : null,
     lastRunAt: typeof row.lastRunAt === 'string' ? row.lastRunAt : null,
     lastStatus: typeof row.lastStatus === 'string' && isRunStatus(row.lastStatus) ? row.lastStatus : null,
@@ -662,6 +690,8 @@ export class TaskListStore {
           ? legacy.enabled === true
           : row?.enabled !== false,
       historyDays: this.options.defaultHistoryDays,
+      pushBotIds: [],
+      pushEnabled: false,
       sessionId: legacy.sessionId ?? (typeof row?.sessionId === 'string' ? row.sessionId : null),
       lastRunAt: legacyLastRun ?? null,
       lastStatus,

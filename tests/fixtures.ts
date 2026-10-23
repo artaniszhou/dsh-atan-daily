@@ -20,6 +20,8 @@ export function task(overrides: Partial<TaskRecord> = {}): TaskRecord {
     timeZone: 'Asia/Shanghai',
     enabled: true,
     historyDays: 7,
+    pushBotIds: [],
+    pushEnabled: false,
     cron: '0 9 * * *',
     ...overrides,
   }

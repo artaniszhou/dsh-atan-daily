@@ -10,7 +10,7 @@ import { hostErrorText } from '../../api/errors.ts'
 import type { AtanDailyApi } from '../../api/tasks.ts'
 import { t } from '../../i18n/index.ts'
 import { Button, Field, TextArea, TextInput } from '../../ui/primitives.tsx'
-import { TimeZoneField } from '../../ui/timezone-field.tsx'
+import { isValidTimeZone, TimeZoneField } from '../../ui/timezone-field.tsx'
 import css from '../create/create.module.css'
 
 /** 表单属性。 */
@@ -45,15 +45,24 @@ export function CreateTaskForm({ api, onCreated, onClose }: CreateTaskFormProps)
   }, [])
 
   const submit = (): void => {
+    if (saving) return
     const trimmed = name.trim()
-    if (trimmed === '' || saving) return
+    if (trimmed === '') {
+      setError(t('nameRequired'))
+      return
+    }
+    const timeZone = zone.trim() === '' ? browserZone() : zone.trim()
+    if (!isValidTimeZone(timeZone)) {
+      setError(t('timeZoneInvalid'))
+      return
+    }
     setSaving(true)
     setError('')
     void api.createTask({
       name: trimmed,
       details,
       schedule: schedule.trim(),
-      timeZone: zone.trim() === '' ? browserZone() : zone.trim(),
+      timeZone,
     }).then(task => {
       onCreated(task)
     }).catch((failure: unknown) => {
@@ -81,7 +90,7 @@ export function CreateTaskForm({ api, onCreated, onClose }: CreateTaskFormProps)
           type="text"
           value={name}
           placeholder={t('namePlaceholder')}
-          onChange={(event) => { setName(event.currentTarget.value) }}
+          onChange={(event) => { setName(event.currentTarget.value); setError('') }}
         />
       </Field>
       <Field label={t('cronLabel')} htmlFor={scheduleId}>

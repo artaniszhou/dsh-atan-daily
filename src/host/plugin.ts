@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { ensureTaskLayout } from './migration.js'
 import {
   hostTimeZone,
@@ -18,6 +19,7 @@ import {
 import { createLogger } from './logger.js'
 import type {
   ApprovalPort,
+  CredentialsPort,
   Logger,
   ModelPort,
   PermissionPresetPort,
@@ -36,9 +38,15 @@ import { createSettingsDescriber } from './settings/describe.js'
 import { createSettingsStore } from './settings/store.js'
 import { createWorkspaceService, isPluginOwned } from './settings/workspace.js'
 import { createTask } from './tasks/create.js'
+import { archiveReports } from './tasks/archive.js'
 import { nextReportName } from './tasks/report.js'
 import { createTaskRoutes, parseTaskPath } from './http/tasks.js'
 import { createSettingsRoutes } from './http/settings.js'
+import { BotStore } from './im/store.js'
+import { createBotService } from './im/service.js'
+import { createFeishuClient } from './im/feishu-api.js'
+import { createBotRoutes } from './im/routes.js'
+import { HOST_IM_ROUTE } from '../protocol.js'
 import {
   answer,
   guard,
@@ -55,6 +63,8 @@ export interface HostContext {
   permissionPresets: PermissionPresetPort
   approval: ApprovalPort
   llm: ModelPort
+  /** 宿主的凭据库；secret 只存这里。 */
+  credentials: CredentialsPort
   inject: (deps: string[], callback: (scope: WebScope) => void) => void
 }
 
@@ -66,6 +76,7 @@ export const inject = [
   'permissionPresets',
   'workspaceRegistry',
   'llm',
+  'credentials',
 ]
 
 /**
@@ -159,6 +170,13 @@ export function apply(ctx: HostContext, config?: Config): void {
     workDir: () => settings.workDir(),
     logger,
   })
+  // IM 机器人：只存非密信息，secret 走宿主的凭据库。
+  const bots = createBotService({
+    store: new BotStore(join(resolved.settingsRoot, 'bots.json')),
+    credentials: ctx.credentials,
+    client: createFeishuClient(),
+    logger,
+  })
   const runSessions = createRunSessions({
     sessions,
     workspaces,
@@ -185,11 +203,24 @@ export function apply(ctx: HostContext, config?: Config): void {
     records,
     sessions: runSessions,
     executor,
+    archiveReports: task => archiveReports(task, logger),
     nextReportName,
     timer: ctx.timer,
     logger,
     clock: () => Date.now(),
     runTimeoutMs: () => resolved.runTimeoutMs,
+    // 运行成功后把报告推到任务绑定的每个机器人；失败只记日志。
+    // 报告名取本次运行的结果，而不是任务快照里上一轮的报告名。
+    onRunFinished: async (task, outcome) => {
+      if (!task.pushEnabled || task.pushBotIds.length === 0) return
+      const delivery = await bots.sendReport(task, outcome.report)
+      const progress = `${String(delivery.sent ?? 0)}/${String(delivery.total ?? 0)}`
+      logger.run({
+        taskId: task.id,
+        event: 'im.push',
+        detail: delivery.ok ? `ok ${progress}` : `${delivery.code ?? 'failed'} ${progress}`,
+      })
+    },
   })
   const recovery = createRunRecovery({
     repository,
@@ -225,6 +256,7 @@ export function apply(ctx: HostContext, config?: Config): void {
     scheduler,
     logger,
   })
+  const botRoutes = createBotRoutes(bots)
 
   ctx.inject(['webServer'], (scope) => {
     scope.effect(() => {
@@ -249,9 +281,11 @@ export function apply(ctx: HostContext, config?: Config): void {
         scope.webServer.register({ kind: 'exact', path: SETTINGS_ROUTE, handler: guard(settingsRoutes.settings, logger) }),
         scope.webServer.register({ kind: 'exact', path: `${SETTINGS_ROUTE}/directory`, handler: guard(settingsRoutes.directory, logger) }),
         scope.webServer.register({ kind: 'prefix', path: ROUTE, handler: item }),
+        scope.webServer.register({ kind: 'prefix', path: HOST_IM_ROUTE, handler: guard(botRoutes.handler, logger) }),
       ]
       return () => {
         for (const dispose of disposers) dispose()
+        bots.close()
       }
     }, 'atan-daily: task routes')
   })

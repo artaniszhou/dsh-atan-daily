@@ -1,12 +1,14 @@
 /**
- * 调度器：一个串行执行队列 + 一个“计算下一次/触发到期”的单飞循环。
+ * 调度器：跨任务并发执行 + 一个“计算下一次/触发到期”的单飞循环。
  *
  * 设计要点：
  *  - 所有 refresh 走同一个循环（single-flight），不会并发改写 timer；
  *  - 重新计算前先处理 `next` 里已经到期的槽位，避免 PATCH/创建/删除触发
  *    的 refresh 把刚到点的执行吞掉；
  *  - 计算失败时保留旧 timer / 安排重试，不会因为一次读失败永久停摆；
- *  - 执行准备阶段有上限，不会让一个卡住的会话调用堵死整个队列。
+ *  - 不设并发上限：不同任务的运行同时开始；同一任务仍然互斥（`running`），
+ *    报告命名与会话归档因此不会被自己撞到；
+ *  - 执行准备阶段有上限，不会让一个卡住的会话调用拖住整个调度循环。
  */
 
 import { latestOccurrence, nextOccurrence, parseCron, type CronRule } from '../../core/cron.js'
@@ -35,12 +37,19 @@ export interface SchedulerDeps {
   records: Pick<RunRecords, 'begin' | 'finish' | 'recordSkip'>
   sessions: Pick<RunSessionService, 'prepare'>
   executor: Pick<RunExecutor, 'drive'>
+  /** 把上一轮报告移进 `history/`；在挑选本轮报告名之前调用。 */
+  archiveReports: (task: TaskRecord) => Promise<string[]>
   nextReportName: (task: TaskRecord) => Promise<string>
   timer: TimerPort
   logger: Logger
   clock: () => number
   runTimeoutMs: () => number
   prepareTimeoutMs?: number
+  /**
+   * 运行落库后回调（推送报告到 IM）。失败只记日志，不影响运行状态。
+   * 只在 `status === 'ok'` 且存在报告时调用。
+   */
+  onRunFinished?: (task: TaskRecord, outcome: RunOutcome) => Promise<void>
 }
 
 /** 调度器对外接口。 */
@@ -51,12 +60,12 @@ export interface Scheduler {
   stop: () => void
   /** 重新计算；`catchUp` 只在启动时为 true。 */
   refresh: (catchUp?: boolean) => Promise<void>
-  /** 手动执行一次：先建会话并返回 id，回合在队列里继续。 */
+  /** 手动执行一次：先建会话并返回 id，回合在后台继续。 */
   startManual: (task: TaskRecord) => Promise<{ sessionId: string }>
   isRunning: (taskId: string) => boolean
   hasRunning: () => boolean
   nextRunAt: (taskId: string) => number | undefined
-  /** 等待队列排空（测试/关闭用）。 */
+  /** 等待所有已启动的运行落地（测试/关闭用）。 */
   waitForIdle: () => Promise<void>
 }
 
@@ -68,8 +77,9 @@ export interface Scheduler {
 export function createScheduler(deps: SchedulerDeps): Scheduler {
   const prepareTimeoutMs = deps.prepareTimeoutMs ?? DEFAULT_PREPARE_TIMEOUT_MS
   const running = new Set<string>()
+  /** 已启动、尚未落地的运行；`waitForIdle` 等它们全部结束。 */
+  const inflight = new Set<Promise<void>>()
   let next = new Map<string, number>()
-  let tail: Promise<void> = Promise.resolve()
   let timerDispose: (() => void) | undefined
   let loop: Promise<void> | undefined
   let requested = false
@@ -114,12 +124,23 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
   }
 
-  function enqueue(work: () => Promise<void>): Promise<void> {
-    const run = tail.then(work, work)
-    // Contain failures: one bad run must not poison the chain, and a rejected
-    // chain would be fatal under DSH's fail-loud handler.
-    tail = run.then(() => undefined, () => undefined)
-    return run
+  /**
+   * 跟踪一次已经启动的运行。
+   *
+   * 不同任务之间不再排队：调用方 `await` 完准备就能返回，执行在后台跑。
+   * 这里只负责兜住异常并释放任务锁——不能让一次失败污染其他运行。
+   * @param task - 任务。
+   * @param run - 已启动的运行。
+   */
+  function track(task: TaskRecord, run: Promise<void>): void {
+    const settled = run.catch((error: unknown) => {
+      deps.logger.warn(`run ${task.id} failed: ${String(error)}`)
+    })
+    inflight.add(settled)
+    void settled.then(() => {
+      running.delete(task.id)
+      inflight.delete(settled)
+    })
   }
 
   async function prepare(task: TaskRecord): Promise<PreparedRun> {
@@ -136,6 +157,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         if (timer !== undefined) clearTimeout(timer)
       }
     }
+    // 先把上一轮完成并留在根目录的报告移进 history/，再挑本轮文件名。
+    // 归档失败（占用、权限）只记日志：报告留在原地，运行照常开始。
+    await withTimeout(deps.archiveReports(task), 'report archiving').catch((error: unknown) => {
+      deps.logger.warn(`could not archive the previous report of ${task.id}: ${String(error)}`)
+    })
     const report = await withTimeout(deps.nextReportName(task), 'report naming')
     const sessionId = await withTimeout(deps.sessions.prepare(task), 'session preparation')
     return { sessionId, report }
@@ -148,6 +174,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   ): Promise<void> {
     await deps.records.finish(task, context, outcome).catch((error: unknown) => {
       deps.logger.warn(`could not finish run ${context.runId}: ${String(error)}`)
+    })
+    if (outcome.status !== 'ok' || outcome.report === undefined) return
+    await deps.onRunFinished?.(task, outcome).catch((error: unknown) => {
+      deps.logger.warn(`run ${context.runId} finished but its delivery failed: ${String(error)}`)
     })
   }
 
@@ -191,31 +221,24 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   function startScheduled(task: TaskRecord, scheduledFor: number, catchUp: boolean): void {
     running.add(task.id)
-    const run = enqueue(async () => {
+    const run = (async () => {
+      if (stopped) return
+      const context = await deps.records.begin(task, 'schedule', catchUp, scheduledFor)
+      let prepared: PreparedRun
       try {
-        if (stopped) return
-        const context = await deps.records.begin(task, 'schedule', catchUp, scheduledFor)
-        let prepared: PreparedRun
-        try {
-          prepared = await prepare(task)
-        } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : String(error)
-          deps.logger.warn(`run ${task.id} could not be prepared: ${message}`)
-          await finish(task, context, {
-            status: 'failed',
-            error: { code: 'prepare_failed', message },
-          })
-          return
-        }
-        await execute(task, context, prepared)
-      } finally {
-        running.delete(task.id)
+        prepared = await prepare(task)
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error)
+        deps.logger.warn(`run ${task.id} could not be prepared: ${message}`)
+        await finish(task, context, {
+          status: 'failed',
+          error: { code: 'prepare_failed', message },
+        })
+        return
       }
-    })
-    void run.catch((error: unknown) => {
-      deps.logger.warn(`queued run ${task.id} failed: ${String(error)}`)
-      running.delete(task.id)
-    })
+      await execute(task, context, prepared)
+    })()
+    track(task, run)
   }
 
   async function dispatchDue(tasks: readonly TaskRecord[], at: number): Promise<void> {
@@ -352,7 +375,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     async startManual(task: TaskRecord): Promise<{ sessionId: string }> {
       if (running.has(task.id)) throw new AppError('already_running', 409, 'already running')
       running.add(task.id)
-      const context = await deps.records.begin(task, 'manual', false)
+      let context: RunContext
+      try {
+        context = await deps.records.begin(task, 'manual', false)
+      } catch (error: unknown) {
+        running.delete(task.id)
+        throw new AppError('run_failed', 500, error instanceof Error ? error.message : String(error))
+      }
       let prepared: PreparedRun
       try {
         prepared = await prepare(task)
@@ -366,23 +395,17 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         })
         throw new AppError('run_failed', 500, message)
       }
-      const run = enqueue(async () => {
-        try {
-          await execute(task, context, prepared)
-        } finally {
-          running.delete(task.id)
-        }
-      })
-      void run.catch((error: unknown) => {
-        deps.logger.warn(`manual run ${task.id} failed: ${String(error)}`)
-        running.delete(task.id)
-      })
+      // 不排队：准备完成后立刻开跑，其他任务的运行不会挡住它。
+      track(task, execute(task, context, prepared))
       return { sessionId: prepared.sessionId }
     },
 
     isRunning: (taskId: string): boolean => running.has(taskId),
     hasRunning: (): boolean => running.size > 0,
     nextRunAt: (taskId: string): number | undefined => next.get(taskId),
-    waitForIdle: (): Promise<void> => tail,
+    async waitForIdle(): Promise<void> {
+      // 循环而不是单次快照：等待期间可能又有运行被启动。
+      while (inflight.size > 0) await Promise.all([...inflight])
+    },
   }
 }

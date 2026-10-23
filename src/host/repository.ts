@@ -12,6 +12,7 @@ import { readRuleContent } from '../core/rule.js'
 import { isSafeTaskId, type TaskListStore, type TaskMeta } from '../core/task-list.js'
 import type { Frequency, TaskRecord } from '../protocol.js'
 import { frequencyOf, isReportName, latestReportName } from './naming.js'
+import { HISTORY_DIR } from './config.js'
 import type { Logger } from './ports.js'
 
 /** 设置页需要的两个计数。 */
@@ -55,9 +56,17 @@ export function createTaskRepository(deps: TaskRepositoryDeps): TaskRepository {
     } catch {
       names = []
     }
+    let archived: string[] = []
+    try {
+      archived = await readdir(join(folder, HISTORY_DIR))
+    } catch {
+      archived = []
+    }
     const reports = names.filter(isReportName)
-    const report = latestReportName(reports)
-    const historyCount = Math.max(0, reports.length - 1)
+    const archivedReports = archived.filter(isReportName)
+    // 运行开始时上一份报告会被移进 history/，所以最新报告可能只存在于那里。
+    const report = latestReportName([...reports, ...archivedReports])
+    const historyCount = Math.max(0, reports.length + archivedReports.length - 1)
     const cron = meta.cron ?? undefined
     let frequency: Frequency = 'on-demand'
     try {
@@ -80,6 +89,8 @@ export function createTaskRepository(deps: TaskRepositoryDeps): TaskRepository {
       timeZone: meta.timeZone,
       enabled: meta.enabled,
       historyDays: meta.historyDays,
+      pushBotIds: [...meta.pushBotIds],
+      pushEnabled: meta.pushEnabled,
       ...meta.lastRunAt === null ? {} : { lastRunAt: meta.lastRunAt },
       ...meta.lastStatus === null ? {} : { lastStatus: meta.lastStatus },
       ...meta.lastDurationMs === null ? {} : { lastDurationMs: meta.lastDurationMs },

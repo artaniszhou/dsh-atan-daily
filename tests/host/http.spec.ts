@@ -96,6 +96,15 @@ describe('validate', () => {
     expect(() => parseRunsQuery('/x?before=nope')).toThrow()
     expect(() => parseRunsQuery('/x?status=nope')).toThrow()
   })
+
+  it('去重并校验 pushBotIds', () => {
+    const result = parsePatchBody({ pushBotIds: ['fs_a', 'fs_a', ' fs_b '] }, frozen)
+    expect(result.patch.pushBotIds).toEqual(['fs_a', 'fs_b'])
+    expect(() => parsePatchBody({ pushBotIds: 'fs_a' }, frozen)).toThrow()
+    expect(() => parsePatchBody({ pushBotIds: ['fs_a', 1] }, frozen)).toThrow()
+    expect(() => parsePatchBody({ pushBotIds: Array.from({ length: 21 }, (_v, i) => `fs_${String(i)}`) }, frozen)).toThrow()
+    expect(parsePatchBody({ pushBotIds: [] }, frozen).patch.pushBotIds).toEqual([])
+  })
 })
 
 describe('task routes', () => {

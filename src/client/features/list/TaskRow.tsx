@@ -1,30 +1,41 @@
 /**
  * 列表中的一行任务。
  *
- * 纯展示：数据进、回调出，不读接口、不持有状态，方便单独渲染测试。
+ * 数据进、回调出；没有本地状态。推送不在这里表达——目标机器人统一由右下角的
+ * 「推送管理」维护：卡片只展示目标图标和入口，开关在抽屉里。
  */
-import type { TaskRecord } from '../../../protocol.ts'
+import type { BotView, TaskRecord } from '../../../protocol.ts'
 import { DETAIL_PREVIEW } from '../../constants.ts'
 import { t } from '../../i18n/index.ts'
 import { formatDuration, formatRunTime } from '../../shared/format.ts'
 import { frequencyKey, runStatusKey, runTone, taskState } from '../../shared/status.ts'
-import { IconHistory, IconPlay } from '../../ui/icons.tsx'
-import { Badge, Button, Switch } from '../../ui/primitives.tsx'
+import { FeishuGlyph } from '../../ui/brand-icons.tsx'
+import { IconHistory, IconPlay, IconRobot } from '../../ui/icons.tsx'
+import { Badge, Button, Switch, cx } from '../../ui/primitives.tsx'
 import css from './list.module.css'
+
+/** 卡片右下角最多展示几个机器人图标。 */
+const MAX_ICONS = 5
 
 /** 行属性。 */
 export interface TaskRowProps {
   task: TaskRecord
+  /** 全部机器人；行内的推送图标据此解析名字与平台。 */
+  bots: BotView[]
   onRun: () => void
   onToggle: () => void
   onOpen: () => void
   onHistory: () => void
   onEdit: () => void
   onRemove: () => void
+  /** 打开「推送机器人」抽屉。 */
+  onManagePush: () => void
 }
 
 /** 一行任务。 */
-export function TaskRow({ task, onRun, onToggle, onOpen, onHistory, onEdit, onRemove }: TaskRowProps) {
+export function TaskRow({
+  task, bots, onRun, onToggle, onOpen, onHistory, onEdit, onRemove, onManagePush,
+}: TaskRowProps) {
   const preview = task.details.length > DETAIL_PREVIEW
     ? `${task.details.slice(0, DETAIL_PREVIEW)}…`
     : task.details
@@ -37,8 +48,17 @@ export function TaskRow({ task, onRun, onToggle, onOpen, onHistory, onEdit, onRe
   const state = taskState(task)
   const running = task.running === true
 
+  const targets = task.pushBotIds
+    .map(id => bots.find(bot => bot.botId === id))
+    .filter((bot): bot is BotView => bot !== undefined)
+  const missing = task.pushBotIds.length - targets.length
+  const shown = targets.slice(0, MAX_ICONS)
+  /** 选过目标但总开关是关的：图标保留但压暗，读屏补一句“已暂停”。 */
+  const pushPaused = !task.pushEnabled && task.pushBotIds.length > 0
+  const targetNames = targets.map(bot => bot.name).join('、')
+
   return (
-    <li>
+    <li className={css.rowItem}>
       <div className={css.row}>
         <div className={css.rowMain}>
           <div className={css.rowBody}>
@@ -125,6 +145,36 @@ export function TaskRow({ task, onRun, onToggle, onOpen, onHistory, onEdit, onRe
           >
             {t('remove')}
           </Button>
+        </div>
+
+        {/* 卡片右下角：目标机器人图标 + 入口；开关在抽屉里。 */}
+        <div className={css.pushBar}>
+          {targets.length === 0
+            ? null
+            : (
+              <span
+                className={cx(css.pushIcons, pushPaused && css.pushIconsPaused)}
+                role="img"
+                aria-label={pushPaused ? `${targetNames} · ${t('pushPaused')}` : targetNames}
+              >
+                {shown.map(bot => (
+                  <span key={bot.botId} className={css.pushIcon} title={bot.name}>
+                    {bot.channel === 'feishu' ? <FeishuGlyph size={14} /> : null}
+                  </span>
+                ))}
+              </span>
+              )}
+          {missing > 0 ? <span className={css.pushMissing} title={t('pushMissingBots')}>!</span> : null}
+          <button
+            type="button"
+            className={css.pushManage}
+            aria-haspopup="dialog"
+            title={t('pushManageHint')}
+            onClick={onManagePush}
+          >
+            <IconRobot size={14} />
+            {t('pushManage')}
+          </button>
         </div>
       </div>
     </li>

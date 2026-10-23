@@ -13,13 +13,18 @@
 export const ROUTES = {
   tasks: 'atan-daily/tasks',
   settings: 'atan-daily/settings',
+  im: 'atan-daily/im',
 } as const
 
 /** host 侧的路由前缀（带前导斜杠，用于精确匹配）。 */
 export const HOST_ROUTES = {
   tasks: `/${ROUTES.tasks}`,
   settings: `/${ROUTES.settings}`,
+  im: `/${ROUTES.im}`,
 } as const
+
+/** 机器人管理路由前缀。 */
+export const HOST_IM_ROUTE = HOST_ROUTES.im
 
 /** 历史保留天数的上限；页面校验与 host 校验共用。 */
 export const HISTORY_DAYS_MAX = 3650
@@ -50,6 +55,62 @@ export type ScheduleMode = 'text' | 'cron' | 'manual'
 export interface RunError {
   code: string
   message: string
+}
+
+/** 已支持的 IM 渠道；新增平台时只在这里加一项。 */
+export type ImChannel = 'feishu'
+
+/** 一次扫码尝试的状态。 */
+export type ProvisionState =
+  | 'starting'
+  | 'waiting'
+  | 'scanned'
+  | 'saving'
+  | 'connected'
+  | 'expired'
+  | 'failed'
+  | 'cancelled'
+
+/** 最近一次发送的结果。 */
+export interface LastSend {
+  at: string
+  ok: boolean
+  code?: string
+}
+
+/** 页面可见的机器人；不含 secretRef 与完整 app_id。 */
+export interface BotView {
+  botId: string
+  channel: ImChannel
+  /** 展示名：接入时确定，之后不可修改。 */
+  name: string
+  appIdMasked: string
+  domain: 'feishu' | 'lark'
+  createdAt: string
+  lastSend: LastSend | null
+}
+
+/** 可直接展示的稳定错误。 */
+export interface ImError {
+  code: string
+  message: string
+}
+
+/** 一次扫码尝试的公开快照。 */
+export interface ProvisionView {
+  attemptId: string
+  state: ProvisionState
+  /** 二维码图片；只有 `waiting` 阶段才有。 */
+  qrCodeDataUrl?: string
+  expiresAt?: number
+  pollIntervalMs: number
+  error?: ImError
+}
+
+/** 机器人列表 + 进行中的扫码。 */
+export interface BotsStatus {
+  bots: BotView[]
+  provisioning: ProvisionView | null
 }
 
 /** 一个任务，按 host 的读模型描述。 */
@@ -94,6 +155,10 @@ export interface TaskRecord {
   nextRunAt?: string
   /** 当前是否正在执行（计算值，不持久化）。 */
   running?: boolean
+  /** 运行成功后把报告发到哪些机器人；空数组表示没有目标。 */
+  pushBotIds: string[]
+  /** 推送开关：关掉保留目标但暂停发送。 */
+  pushEnabled: boolean
 }
 
 /** 一次运行的完整记录，与 `meta/runs/<runId>.json` 一一对应。 */
@@ -158,4 +223,8 @@ export interface TaskPatch {
   timeZone?: string
   historyDays?: number
   sessionId?: string
+  /** 绑定的机器人列表；空数组表示清空目标。 */
+  pushBotIds?: string[]
+  /** 推送开关。 */
+  pushEnabled?: boolean
 }

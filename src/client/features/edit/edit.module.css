@@ -47,6 +47,13 @@
   line-height: 18px;
 }
 
+/* 仅手动：讲清「不参与定时 = 保存后置为未启用」，避免被当成任务丢了。 */
+.manualNote {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
 @media (max-width: 520px) {
   .editRow {
     grid-template-columns: minmax(0, 1fr);

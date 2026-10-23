@@ -22,7 +22,7 @@ function meta(id: string, overrides: Partial<TaskMeta> = {}): TaskMeta {
   return {
     v: 2, id, name: id, createdAt: '2026-10-01T00:00:00.000Z', scheduleMode: 'cron',
     cron: '0 9 * * *', scheduleText: null, timeZone: 'UTC', enabled: true, historyDays: 7,
-    sessionId: null, lastRunAt: null, lastStatus: null, lastDurationMs: null,
+    pushBotIds: [], pushEnabled: false, sessionId: null, lastRunAt: null, lastStatus: null, lastDurationMs: null,
     lastRunId: null, lastError: null, updatedAt: '2026-10-01T00:00:00.000Z',
     ...overrides,
   }
@@ -51,6 +51,36 @@ describe('task repository', () => {
     expect(task?.frequency).toBe('daily')
     expect(await repository.count()).toEqual({ total: 1, enabled: 1 })
     expect((await repository.read('t1'))?.name).toBe('t1')
+  })
+
+  it('把 history/ 里的归档报告算进最新报告与历史数量', async () => {
+    const { dir, store } = await setup()
+    await store.create(meta('t1'))
+    const folder = join(dir, 't1')
+    await mkdir(join(folder, 'history'), { recursive: true })
+    await writeRuleContent(folder, '任务详情')
+    await writeFile(join(folder, 'history', '2026-10-17-090000.md'), 'old', 'utf8')
+    await writeFile(join(folder, 'history', '2026-10-18-090000.md'), 'older', 'utf8')
+    await writeFile(join(folder, '2026-10-19-090000.md'), 'new', 'utf8')
+
+    const repository = createTaskRepository({ store: () => store, workDir: () => dir, logger })
+    const [task] = await repository.list()
+    expect(task?.report).toBe('2026-10-19-090000.md')
+    expect(task?.historyCount).toBe(2)
+  })
+
+  it('最新报告只在 history/ 里时仍然可见（运行开始前已归档）', async () => {
+    const { dir, store } = await setup()
+    await store.create(meta('t1'))
+    const folder = join(dir, 't1')
+    await mkdir(join(folder, 'history'), { recursive: true })
+    await writeRuleContent(folder, '任务详情')
+    await writeFile(join(folder, 'history', '2026-10-18-090000.md'), 'only', 'utf8')
+
+    const repository = createTaskRepository({ store: () => store, workDir: () => dir, logger })
+    const [task] = await repository.list()
+    expect(task?.report).toBe('2026-10-18-090000.md')
+    expect(task?.historyCount).toBe(0)
   })
 
   it('skips registry rows whose folder is gone', async () => {

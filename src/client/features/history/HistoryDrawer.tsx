@@ -26,6 +26,11 @@ function openRun(run: RunRecord, onOpenSession: (sessionId: string) => void): vo
   if (run.sessionId !== null) onOpenSession(run.sessionId)
 }
 
+/** 保留期说明：跟随任务自己的 `historyDays`，0 表示永久。 */
+function retentionText(days: number): string {
+  return days === 0 ? t('runsRetentionForever') : t('runsRetention', { days })
+}
+
 /** 运行历史抽屉。 */
 export function HistoryDrawer({ api, task, onClose, onOpenSession }: HistoryDrawerProps) {
   const history = useRunHistory(api, task.id)
@@ -103,7 +108,7 @@ export function HistoryDrawer({ api, task, onClose, onOpenSession }: HistoryDraw
     <Dialog
       variant="drawer"
       title={t('runsTitle')}
-      subtitle={`${task.name} · ${t('runsRetention')}`}
+      subtitle={`${task.name} · ${retentionText(task.historyDays)}`}
       closeLabel={t('runsClose')}
       onClose={onClose}
     >

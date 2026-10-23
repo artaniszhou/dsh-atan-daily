@@ -9,7 +9,7 @@ import { mkdir, readdir, readFile, rename, rm, rmdir, stat } from 'node:fs/promi
 import { join } from 'node:path'
 import { writeAtomic } from '../core/fs.js'
 import { parseLegacyRule, upsertManifestSection } from '../core/rule.js'
-import { CACHE_DIR, META_DIR, RULE_NAME, SCRIPT_DIR } from './config.js'
+import { CACHE_DIR, HISTORY_DIR, META_DIR, RULE_NAME, SCRIPT_DIR } from './config.js'
 import { folderNameOf, REPORT_SUFFIX } from './naming.js'
 import type { Logger } from './ports.js'
 
@@ -25,8 +25,8 @@ const LEGACY_DOCS: readonly (readonly [string, string])[] = [
   ['脚本.md', SCRIPT_MANIFEST],
   ['脚本清单.md', SCRIPT_MANIFEST],
 ]
-/** 旧的报告归档目录，迁移时折回任务根。 */
-const HISTORY_DIR = '历史报告'
+/** 旧的报告归档目录，迁移时并入 `history/`。 */
+const LEGACY_HISTORY_DIR = '历史报告'
 
 /**
  * 从当前或旧位置读规则文档。
@@ -220,14 +220,22 @@ async function mergeManifest(folder: string, kind: 'cache' | 'script'): Promise<
 }
 
 /**
- * 把旧 `历史报告/` 折回任务根。
+ * 把旧 `历史报告/` 里的报告并入 `history/`。
+ *
+ * 文件名保持不变；目标已存在同名文件时追加 `-2`、`-3`，绝不覆盖。
  * @param folder - 任务目录。
  */
 async function migrateReportHistory(folder: string): Promise<void> {
-  const history = join(folder, HISTORY_DIR)
+  const legacy = join(folder, LEGACY_HISTORY_DIR)
   let entries
   try {
-    entries = await readdir(history, { withFileTypes: true })
+    entries = await readdir(legacy, { withFileTypes: true })
+  } catch {
+    return
+  }
+  const history = join(folder, HISTORY_DIR)
+  try {
+    await mkdir(history, { recursive: true })
   } catch {
     return
   }
@@ -237,16 +245,16 @@ async function migrateReportHistory(folder: string): Promise<void> {
     let suffix = 2
     while (true) {
       try {
-        await stat(join(folder, name))
+        await stat(join(history, name))
         name = entry.name.replace(/\.md$/u, `-${String(suffix)}.md`)
         suffix += 1
       } catch {
         break
       }
     }
-    await rename(join(history, entry.name), join(folder, name)).catch(() => {})
+    await rename(join(legacy, entry.name), join(history, name)).catch(() => {})
   }
-  await rmdir(history).catch(() => {})
+  await rmdir(legacy).catch(() => {})
 }
 
 /**

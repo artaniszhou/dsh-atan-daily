@@ -1,0 +1,367 @@
+/**
+ * 机器人管理抽屉的样式。
+ *
+ * 只用 `--dsw-*` 语义令牌；唯一例外是二维码托盘的白底——深色主题下二维码
+ * 必须在白底上才能被扫出来，这个色值不参与主题映射（见 `.qrPlate` 注释）。
+ */
+
+/* ---------- 列表 ---------- */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+}
+
+.cardText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cardName {
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardMeta {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions,
+.confirmActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actions {
+  justify-content: flex-end;
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--dsw-radius-sm);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);
+}
+
+.confirmText {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.removeSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 16px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 每一步纵向排：标题、路径、入口链接。 */
+.removeStep {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.removeStepTitle {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.removeNote {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.removeLink {
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+  text-underline-offset: 2px;
+}
+
+.confirmActions {
+  justify-content: flex-end;
+}
+
+.errorDetail {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  word-break: break-word;
+}
+
+.emptyTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+}
+
+/* ---------- 选平台 ---------- */
+.pick {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  padding-top: 8px;
+}
+
+.rows {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nameField {
+  width: 100%;
+}
+
+/* 一个平台一行：左图标、中名称与说明、右箭头。 */
+.platformRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms var(--ds-ease-in-out, ease);
+}
+
+.platformRow:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.platformRow:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.platformIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-base);
+}
+
+.platformText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.platformName {
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.platformDesc {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platformChevron {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 18px;
+  line-height: 22px;
+}
+
+/* 规划中的平台：与飞书同一张卡片，只是不可点。 */
+.platformRowSoon {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.soonBadge {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 扫码头部的提示与主按钮（还未生成二维码时）。 */
+.scanIntro {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  padding: 24px 0 8px;
+}
+
+.scanIntroHint {
+  margin: 0;
+  max-width: 280px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* ---------- 扫码 ---------- */
+.scan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  padding-top: 8px;
+}
+
+.scanTitle {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.qrPlate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: content-box;
+  width: 200px;
+  height: 200px;
+  padding: 12px;
+  border-radius: var(--dsw-radius-md);
+  /* 有意硬编码：二维码必须在纯白背景上，深色主题下也不能变。 */
+  background: #ffffff;
+}
+
+.qrImage {
+  display: block;
+  width: 200px;
+  height: 200px;
+}
+
+.qrEmpty {
+  padding: 0 12px;
+  color: #6b6b6b;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.scanHint {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.countdown {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+}
+
+.countdownWarn {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.scanStatus {
+  margin: 0;
+  min-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.scanActions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+@media (max-width: 560px) {
+  .editRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .editActions {
+    justify-content: flex-end;
+  }
+}

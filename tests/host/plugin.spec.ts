@@ -95,6 +95,11 @@ async function harness(): Promise<Harness> {
     sessionController,
     permissionPresets: { set: vi.fn() },
     approval: { setPolicy: vi.fn() },
+    credentials: {
+      resolve: vi.fn(async () => undefined),
+      set: vi.fn(async () => {}),
+      unset: vi.fn(async () => {}),
+    },
     llm: {
       listProviders: () => [{ id: 'deepseek-official' }],
       listModels: async () => [{ id: 'deepseek-flash' }],
@@ -141,14 +146,23 @@ describe('apply', () => {
     expect(inject).toContain('timer')
     expect(inject).toContain('sessionController')
     expect(inject).toContain('workspaceRegistry')
+    expect(inject).toContain('credentials')
   })
 
-  it('registers the four routes and serves a create/list/settings round trip', async () => {
+  it('serves an empty bot list', async () => {
+    const app = await harness()
+    const status = await app.invoke('prefix', '/atan-daily/im', 'GET', '/atan-daily/im/status')
+    expect(status.status).toBe(200)
+    expect(JSON.parse(status.body)).toEqual({ ok: true, bots: [], provisioning: null })
+  })
+
+  it('registers the expected routes and serves a create/list/settings round trip', async () => {
     const app = await harness()
     expect(app.routes.map(route => `${route.kind}:${route.path}`).sort()).toEqual([
       'exact:/atan-daily/settings',
       'exact:/atan-daily/settings/directory',
       'exact:/atan-daily/tasks',
+      'prefix:/atan-daily/im',
       'prefix:/atan-daily/tasks',
     ])
 

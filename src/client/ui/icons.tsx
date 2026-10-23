@@ -88,6 +88,29 @@ export function IconPlus() {
   return <StrokeIcon size={16}><path d="M12 5v14M5 12h14" /></StrokeIcon>
 }
 
+/** 机器人（「机器人管理」入口）。 */
+export function IconRobot({ size = 16 }: IconProps) {
+  return (
+    <StrokeIcon size={size}>
+      <rect x={4.5} y={8} width={15} height={10.5} rx={2.5} />
+      <path d="M12 8V5.6" />
+      <circle cx={12} cy={4.4} r={1.1} />
+      <path d="M9.4 12.6h.01M14.6 12.6h.01" />
+      <path d="M9.8 15.4h4.4" />
+    </StrokeIcon>
+  )
+}
+
+/** 推送（任务行开关前缀）。 */
+export function IconSend({ size = 16 }: IconProps) {
+  return (
+    <StrokeIcon size={size}>
+      <path d="M20.5 3.5 3.5 9.8l6.3 2.4 2.4 6.3 8.3-15Z" />
+      <path d="M20.5 3.5 9.8 12.1" />
+    </StrokeIcon>
+  )
+}
+
 /** 侧栏入口：两个叠起来的消息气泡。 */
 export function PanelIcon({ size }: { size: number }) {
   return (

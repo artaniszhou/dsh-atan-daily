@@ -11,6 +11,7 @@
 
 .row {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
@@ -93,6 +94,68 @@
   justify-content: flex-end;
   gap: 8px;
   padding-top: 1px;
+}
+
+/* 卡片右下角：目标机器人图标 + 「推送管理」；开关在抽屉里。 */
+.pushBar {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: -2px;
+}
+
+.pushIcons {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 选过目标但推送总开关关着：图标保留，压暗提示暂停。 */
+.pushIconsPaused {
+  opacity: 0.45;
+}
+
+.pushIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.pushMissing {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.pushManage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.pushManage:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.pushManage:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
 }
 
 /* ---------- 统计条 ---------- */
@@ -276,4 +339,9 @@
   .row {
     transition: none;
   }
+}
+
+/* ---------- 任务行容器 ---------- */
+.rowItem {
+  position: relative;
 }

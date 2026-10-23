@@ -12,7 +12,7 @@ import { writeRuleContent } from '../../core/rule.js'
 import type { ParsedSchedule } from '../../core/schedule-text.js'
 import type { TaskListStore, TaskMeta } from '../../core/task-list.js'
 import type { TaskRecord } from '../../protocol.js'
-import { CACHE_DIR, META_DIR, SCRIPT_DIR } from '../config.js'
+import { CACHE_DIR, HISTORY_DIR, META_DIR, SCRIPT_DIR } from '../config.js'
 import { AppError } from '../errors.js'
 import { folderNameOf } from '../naming.js'
 import type { TaskRepository } from '../repository.js'
@@ -73,6 +73,8 @@ export async function createTask(deps: CreateTaskDeps, input: CreateTaskInput): 
     timeZone: input.timeZone,
     enabled: input.schedule !== undefined,
     historyDays: deps.defaultHistoryDays,
+    pushBotIds: [],
+    pushEnabled: false,
     sessionId: null,
     lastRunAt: null,
     lastStatus: null,
@@ -84,6 +86,8 @@ export async function createTask(deps: CreateTaskDeps, input: CreateTaskInput): 
   try {
     await mkdir(join(folder, META_DIR, CACHE_DIR), { recursive: true })
     await mkdir(join(folder, META_DIR, SCRIPT_DIR), { recursive: true })
+    // 与 meta/ 同级：归档更早的报告，任务根只留最新一份。
+    await mkdir(join(folder, HISTORY_DIR), { recursive: true })
     await writeRuleContent(folder, input.details)
     await deps.store().create(meta)
   } catch (error: unknown) {

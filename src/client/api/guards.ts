@@ -8,7 +8,12 @@
  * 取舍：手写校验而不是引入 zod，是为了让 client bundle 不增加运行时依赖。
  */
 import type {
+  BotsStatus,
+  BotView,
   Frequency,
+  ImChannel,
+  ProvisionState,
+  ProvisionView,
   RunRecord,
   RunStatus,
   ScheduleMode,
@@ -20,6 +25,10 @@ import { HostError } from './errors.ts'
 const FREQUENCIES: readonly Frequency[] = ['daily', 'hourly', 'on-demand']
 const RUN_STATUSES: readonly RunStatus[] = ['running', 'ok', 'failed', 'timeout', 'cancelled', 'interrupted', 'skipped']
 const SCHEDULE_MODES: readonly ScheduleMode[] = ['text', 'cron', 'manual']
+const IM_CHANNELS: readonly ImChannel[] = ['feishu']
+const PROVISION_STATES: readonly ProvisionState[] = [
+  'starting', 'waiting', 'scanned', 'saving', 'connected', 'expired', 'failed', 'cancelled',
+]
 
 /** 统一的解码失败。 */
 function fail(message: string): never {
@@ -67,6 +76,15 @@ function reqNumber(record: Record<string, unknown>, key: string): number {
   const value = record[key]
   if (typeof value !== 'number' || !Number.isFinite(value)) fail(`字段 ${key} 不是数字`)
   return value
+}
+
+/** 必填字符串数组。 */
+function reqStringArray(record: Record<string, unknown>, key: string): string[] {
+  const value = record[key]
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+    fail(`字段 ${key} 不是字符串数组`)
+  }
+  return value as string[]
 }
 
 /** 选填数字。 */
@@ -134,6 +152,8 @@ export function decodeTask(value: unknown): TaskRecord {
     timeZone: reqString(record, 'timeZone'),
     enabled: reqBool(record, 'enabled'),
     historyDays: reqNumber(record, 'historyDays'),
+    pushBotIds: reqStringArray(record, 'pushBotIds'),
+    pushEnabled: optBool(record, 'pushEnabled') ?? false,
   }
   const sessionId = optString(record, 'sessionId')
   if (sessionId !== undefined) task.sessionId = sessionId
@@ -247,4 +267,66 @@ export function decodeSessionId(payload: unknown): string | undefined {
 /** 删除等无内容响应。 */
 export function decodeVoid(): void {
   // 有意为空：只要状态码是 2xx，响应体不作要求。
+}
+
+/** 解码一个机器人。 */
+function decodeBot(value: unknown): BotView {
+  const record = asRecord(value, 'bot')
+  const lastSendRaw = record['lastSend']
+  let lastSend: BotView['lastSend'] = null
+  if (lastSendRaw !== null && lastSendRaw !== undefined) {
+    const send = asRecord(lastSendRaw, 'bot.lastSend')
+    const code = optString(send, 'code')
+    lastSend = {
+      at: reqString(send, 'at'),
+      ok: reqBool(send, 'ok'),
+      ...(code === undefined ? {} : { code }),
+    }
+  }
+  return {
+    botId: reqString(record, 'botId'),
+    channel: oneOf(record, 'channel', IM_CHANNELS),
+    name: reqString(record, 'name'),
+    appIdMasked: reqString(record, 'appIdMasked'),
+    domain: oneOf(record, 'domain', ['feishu', 'lark'] as const),
+    createdAt: reqString(record, 'createdAt'),
+    lastSend,
+  }
+}
+
+/** 解码一次扫码快照。 */
+function decodeProvision(value: unknown): ProvisionView {
+  const record = asRecord(value, 'provisioning')
+  const view: ProvisionView = {
+    attemptId: reqString(record, 'attemptId'),
+    state: oneOf(record, 'state', PROVISION_STATES),
+    pollIntervalMs: reqNumber(record, 'pollIntervalMs'),
+  }
+  const qr = optString(record, 'qrCodeDataUrl')
+  if (qr !== undefined) view.qrCodeDataUrl = qr
+  const expiresAt = optNumber(record, 'expiresAt')
+  if (expiresAt !== undefined) view.expiresAt = expiresAt
+  const errorRaw = record['error']
+  if (errorRaw !== undefined && errorRaw !== null) {
+    const error = asRecord(errorRaw, 'provisioning.error')
+    view.error = { code: reqString(error, 'code'), message: reqString(error, 'message') }
+  }
+  return view
+}
+
+/** 解码机器人列表（也用于变更接口的响应）。 */
+export function decodeBotsStatus(payload: unknown): BotsStatus {
+  const record = asRecord(payload, 'response')
+  if (!Array.isArray(record.bots)) fail('字段 bots 不是数组')
+  const raw = record['provisioning']
+  return {
+    bots: record.bots.map(decodeBot),
+    provisioning: raw === null || raw === undefined ? null : decodeProvision(raw),
+  }
+}
+
+/** 解码扫码开始/轮询响应。 */
+export function decodeProvisionResponse(payload: unknown): ProvisionView {
+  const record = asRecord(payload, 'response')
+  return decodeProvision(record.provisioning)
 }

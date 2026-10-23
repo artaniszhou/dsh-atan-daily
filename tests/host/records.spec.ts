@@ -18,7 +18,7 @@ async function setup(): Promise<{ dir: string, store: TaskListStore, folder: str
   const meta: TaskMeta = {
     v: 2, id: 't1', name: 'T1', createdAt: '2026-10-01T00:00:00.000Z',
     scheduleMode: 'cron', cron: '0 9 * * *', scheduleText: null, timeZone: 'UTC',
-    enabled: true, historyDays: 7, sessionId: null, lastRunAt: null, lastStatus: null,
+    enabled: true, historyDays: 7, pushBotIds: [], pushEnabled: false, sessionId: null, lastRunAt: null, lastStatus: null,
     lastDurationMs: null, lastRunId: null, lastError: null, updatedAt: '2026-10-01T00:00:00.000Z',
   }
   await store.create(meta)

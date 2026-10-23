@@ -173,6 +173,10 @@
 .switchOn {
   background: var(--dsw-alias-button-primary-fill);
 }
+/* 绿色开启态：只用于"推送开关"，与任务开关的蓝色区分。 */
+.switchOnSuccess {
+  background: var(--dsw-alias-state-success-primary);
+}
 .switchDisabled {
   opacity: 0.5;
   cursor: default;

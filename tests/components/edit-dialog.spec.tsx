@@ -35,6 +35,14 @@ describe('EditDialog', () => {
     await waitFor(() => { expect(onSaved).toHaveBeenCalledOnce() })
   })
 
+  it('切到「仅手动」时说明该任务会置为未启用', () => {
+    render(<EditDialog api={fakeApi()} task={task()} onClose={vi.fn()} onSaved={vi.fn()} />)
+
+    expect(screen.queryByText('仅手动任务不参与定时，保存后会置为未启用。')).toBeNull()
+    fireEvent.click(screen.getByLabelText('仅手动'))
+    expect(screen.getByText('仅手动任务不参与定时，保存后会置为未启用。')).toBeTruthy()
+  })
+
   it('clears the input when switching the schedule parser', () => {
     render(<EditDialog api={fakeApi()} task={task()} onClose={vi.fn()} onSaved={vi.fn()} />)
     const input = screen.getByRole('textbox', { name: '执行时间' }) as HTMLInputElement

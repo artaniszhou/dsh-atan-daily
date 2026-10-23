@@ -39,6 +39,12 @@
   font-weight: 500;
   line-height: 28px;
 }
+.headingActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
 .subtitle {
   margin: 0 0 16px;
   color: var(--dsw-alias-label-secondary);

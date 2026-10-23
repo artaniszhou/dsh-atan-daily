@@ -34,14 +34,44 @@ function allZones(): string[] {
   return sortedZones
 }
 
+/** 时区合法性缓存；同一串文本只问一次 `Intl`。 */
+const knownZones = new Map<string, boolean>()
+
+/**
+ * 判断一个字符串是不是合法的 IANA 时区。
+ *
+ * 用 `Intl.DateTimeFormat` 试构造而不是查列表：`supportedValuesOf` 在旧浏览器里
+ * 可能缺失，而构造失败就是最直接的“这个时区不能用”。
+ * @param zone - 用户输入或任务里的时区。
+ * @returns 合法时为 true。
+ */
+export function isValidTimeZone(zone: string): boolean {
+  const text = zone.trim()
+  if (text === '') return false
+  const cached = knownZones.get(text)
+  if (cached !== undefined) return cached
+  let valid = false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: text })
+    valid = true
+  } catch {
+    valid = false
+  }
+  knownZones.set(text, valid)
+  return valid
+}
+
 /**
  * 当前任务的时区排在最前，其余按字母序。
+ *
+ * 只把**合法**的当前值排到首位：用户随手输入的半截词（`Tokyo`）不该变成
+ * 一个可回车选中的选项，否则提交时必然被 Host 拒绝。
  * @param current - 当前值。
  * @returns 选项列表。
  */
 export function timeZoneOptions(current: string): string[] {
   const zones = allZones()
-  if (current === '') return zones
+  if (!isValidTimeZone(current)) return zones
   return [current, ...zones.filter(zone => zone !== current)]
 }
 

@@ -61,6 +61,8 @@ function setup(initial: TaskRecord): {
   recordSkip: ReturnType<typeof vi.fn>
   prepare: ReturnType<typeof vi.fn>
   list: ReturnType<typeof vi.fn>
+  archive: ReturnType<typeof vi.fn>
+  nextReportName: ReturnType<typeof vi.fn>
   setTasks: (tasks: TaskRecord[]) => void
   clock: { now: number }
 } {
@@ -73,13 +75,16 @@ function setup(initial: TaskRecord): {
   const prepare = vi.fn(async () => 'session-1')
   const executor = vi.fn(async () => {})
   const list = vi.fn(async () => tasks)
+  const archive = vi.fn(async () => [] as string[])
+  const nextReportName = vi.fn(async () => 'report.md')
   const records = { begin, finish, recordSkip } as unknown as Pick<RunRecords, 'begin' | 'finish' | 'recordSkip'>
   const deps: SchedulerDeps = {
     repository: { list },
     records,
     sessions: { prepare },
     executor: { drive: executor },
-    nextReportName: async () => 'report.md',
+    archiveReports: archive,
+    nextReportName,
     timer,
     logger,
     clock: () => clock.now,
@@ -87,7 +92,7 @@ function setup(initial: TaskRecord): {
   }
   return {
     scheduler: createScheduler(deps),
-    timer, executor, begin, finish, recordSkip, prepare, list,
+    timer, executor, begin, finish, recordSkip, prepare, list, archive, nextReportName,
     setTasks: (next: TaskRecord[]) => { tasks = next },
     clock,
   }
@@ -204,5 +209,82 @@ describe('scheduler', () => {
     release?.()
     await s.scheduler.waitForIdle()
     expect(s.executor).toHaveBeenCalledTimes(1)
+  })
+
+  it('archives the previous report before naming the next one', async () => {
+    const s = setup(daily)
+    await s.scheduler.start()
+    s.clock.now = Date.parse('2026-10-20T09:00:00.000Z')
+    s.timer.fire()
+    await flush()
+    await s.scheduler.waitForIdle()
+    expect(s.archive).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }))
+    const archiveOrder = s.archive.mock.invocationCallOrder[0] ?? 0
+    const namingOrder = s.nextReportName.mock.invocationCallOrder[0] ?? 0
+    expect(archiveOrder).toBeLessThan(namingOrder)
+  })
+
+  it('starts tasks that are due at the same moment concurrently', async () => {
+    const s = setup(daily)
+    const other = task({
+      id: 't2',
+      folder: '/work/t2',
+      timeZone: 'UTC',
+      cron: '0 9 * * *',
+      enabled: true,
+      createdAt: '2026-10-01T00:00:00.000Z',
+      lastRunAt: '2026-10-19T09:00:00.000Z',
+    })
+    s.setTasks([daily, other])
+    const releases: Array<() => void> = []
+    s.executor.mockImplementation(() => new Promise<void>((resolve) => { releases.push(resolve) }))
+    await s.scheduler.start()
+    s.clock.now = Date.parse('2026-10-20T09:00:00.000Z')
+    s.timer.fire()
+    await flush()
+
+    // 两个任务的回合都已开始：不是 A 跑完才轮到 B。
+    expect(s.executor).toHaveBeenCalledTimes(2)
+    expect(s.scheduler.isRunning('t1')).toBe(true)
+    expect(s.scheduler.isRunning('t2')).toBe(true)
+
+    let idle = false
+    const waiting = s.scheduler.waitForIdle().then(() => { idle = true })
+    await flush()
+    expect(idle).toBe(false)
+
+    for (const release of releases) release()
+    await waiting
+    expect(s.finish).toHaveBeenCalledTimes(2)
+    expect(s.scheduler.isRunning('t1')).toBe(false)
+    expect(s.scheduler.isRunning('t2')).toBe(false)
+  })
+
+  it('does not make a manual run wait behind another task', async () => {
+    const s = setup(daily)
+    const other = task({
+      id: 't2',
+      folder: '/work/t2',
+      timeZone: 'UTC',
+      cron: '0 9 * * *',
+      enabled: true,
+      createdAt: '2026-10-01T00:00:00.000Z',
+      lastRunAt: '2026-10-19T09:00:00.000Z',
+    })
+    const releases: Array<() => void> = []
+    s.executor.mockImplementation(() => new Promise<void>((resolve) => { releases.push(resolve) }))
+    await s.scheduler.start()
+    s.clock.now = Date.parse('2026-10-20T09:00:00.000Z')
+    s.timer.fire()
+    await flush()
+    expect(s.executor).toHaveBeenCalledTimes(1)
+
+    const started = await s.scheduler.startManual(other)
+    await flush()
+    expect(started).toEqual({ sessionId: 'session-1' })
+    expect(s.executor).toHaveBeenCalledTimes(2)
+
+    for (const release of releases) release()
+    await s.scheduler.waitForIdle()
   })
 })

@@ -11,6 +11,9 @@ import { HISTORY_DAYS_MAX, RUN_PAGE_SIZE, type RunStatus, type TaskRecord } from
 import { isRunStatus, MAX_DETAIL_LENGTH, MAX_NAME_LENGTH } from '../config.js'
 import { AppError } from '../errors.js'
 
+/** 一个任务最多绑几个推送机器人。 */
+const PUSH_BOTS_MAX = 20
+
 /** 新建任务的已校验输入。 */
 export interface CreateInput {
   name: string
@@ -158,6 +161,29 @@ export function parsePatchBody(payload: unknown, current: TaskRecord): PatchInpu
     }
     patch.historyDays = days
     historyDaysChanged = true
+  }
+
+  if (record['pushBotIds'] !== undefined) {
+    const value = record['pushBotIds']
+    if (!Array.isArray(value) || value.length > PUSH_BOTS_MAX) {
+      throw new AppError('invalid_input', 400, `pushBotIds 必须是最多 ${String(PUSH_BOTS_MAX)} 个机器人 id 的数组`)
+    }
+    const ids: string[] = []
+    for (const item of value) {
+      if (typeof item !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/u.test(item.trim())) {
+        throw new AppError('invalid_input', 400, 'pushBotIds 里的每一项都必须是机器人 id')
+      }
+      const id = item.trim()
+      if (!ids.includes(id)) ids.push(id)
+    }
+    patch.pushBotIds = ids
+  }
+
+  if (record['pushEnabled'] !== undefined) {
+    if (typeof record['pushEnabled'] !== 'boolean') {
+      throw new AppError('invalid_input', 400, 'pushEnabled 必须是布尔值')
+    }
+    patch.pushEnabled = record['pushEnabled']
   }
 
   let scheduleInput: { mode?: unknown, text?: unknown, cron?: unknown } | undefined

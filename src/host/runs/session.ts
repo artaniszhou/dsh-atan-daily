@@ -9,7 +9,7 @@ import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { TaskListStore } from '../../core/task-list.js'
 import type { TaskRecord } from '../../protocol.js'
-import { CACHE_DIR, META_DIR, SCRIPT_DIR } from '../config.js'
+import { CACHE_DIR, HISTORY_DIR, META_DIR, SCRIPT_DIR } from '../config.js'
 import type { Logger, SessionPort, WorkspacePort } from '../ports.js'
 import { workspaceAt, type PreparedWorkDir } from '../settings/workspace.js'
 
@@ -38,12 +38,29 @@ export interface RunSessionService {
  * @returns 会话服务。
  */
 export function createRunSessions(deps: RunSessionDeps): RunSessionService {
+  /**
+   * 同一时刻只准备一次 Workspace。
+   *
+   * 运行之间不再排队，插件刚启动时多个任务可能同时到达；没有这个单飞，
+   * 同一目录会被重复注册成多个 Workspace。
+   */
+  let workspaceReady: Promise<string | undefined> | undefined
+
   async function ensureWorkspaceId(): Promise<string | undefined> {
-    const current = deps.workDir()
-    const existing = workspaceAt(deps.workspaces, current)
-    if (existing !== undefined) return existing.id
-    const prepared = await deps.prepareWorkDir(current).catch(() => undefined)
-    return prepared?.workspace?.id
+    if (workspaceReady !== undefined) return await workspaceReady
+    const attempt = (async (): Promise<string | undefined> => {
+      const current = deps.workDir()
+      const existing = workspaceAt(deps.workspaces, current)
+      if (existing !== undefined) return existing.id
+      const prepared = await deps.prepareWorkDir(current).catch(() => undefined)
+      return prepared?.workspace?.id
+    })()
+    workspaceReady = attempt
+    try {
+      return await attempt
+    } finally {
+      workspaceReady = undefined
+    }
   }
 
   async function create(): Promise<string> {
@@ -77,6 +94,8 @@ export function createRunSessions(deps: RunSessionDeps): RunSessionService {
       // rule points at them, so recreate them before the agent looks.
       await mkdir(join(task.folder, META_DIR, CACHE_DIR), { recursive: true }).catch(() => {})
       await mkdir(join(task.folder, META_DIR, SCRIPT_DIR), { recursive: true }).catch(() => {})
+      // 老任务也要有与 meta/ 同级的归档目录，报告才能按轮次搬进去。
+      await mkdir(join(task.folder, HISTORY_DIR), { recursive: true }).catch(() => {})
       await retire(task)
       return await create()
     },

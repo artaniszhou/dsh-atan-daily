@@ -7,6 +7,8 @@
 import {
   ROUTES,
   RUN_PAGE_SIZE,
+  type BotsStatus,
+  type ProvisionView,
   type RunRecord,
   type SettingsView,
   type TaskPatch,
@@ -15,6 +17,8 @@ import {
 import { browserHttp, type HttpPort } from '../platform/http.ts'
 import { HostError } from './errors.ts'
 import {
+  decodeBotsStatus,
+  decodeProvisionResponse,
   decodeRunList,
   decodeSessionId,
   decodeSettings,
@@ -45,6 +49,16 @@ export interface AtanDailyApi {
   loadSettings(): Promise<SettingsView>
   saveWorkDir(workDir: string | null): Promise<SettingsView>
   createDirectory(): Promise<SettingsView>
+  /** 机器人列表 + 进行中的扫码。 */
+  loadBots(): Promise<BotsStatus>
+  /** 开始一次飞书扫码；`name` 会写进飞书应用名，接入后不可修改。 */
+  beginFeishuProvision(name?: string): Promise<ProvisionView>
+  /** 拉一次扫码进度。 */
+  pollProvision(attemptId: string): Promise<ProvisionView>
+  /** 取消扫码。 */
+  cancelProvision(attemptId: string): Promise<ProvisionView>
+  /** 移除接入（只断开本机；飞书应用需用户自行删除）。 */
+  removeBot(botId: string): Promise<BotsStatus>
 }
 
 /** 带 JSON 头的请求初始化。 */
@@ -97,5 +111,30 @@ export function createApi(port: HttpPort = browserHttp): AtanDailyApi {
     saveWorkDir: workDir => request(port, ROUTES.settings, decodeSettings, jsonInit('PATCH', { workDir })),
 
     createDirectory: () => request(port, `${ROUTES.settings}/directory`, decodeSettings, jsonInit('POST')),
+
+    loadBots: () => request(port, `${ROUTES.im}/status`, decodeBotsStatus),
+
+    beginFeishuProvision: name => request(
+      port,
+      `${ROUTES.im}/feishu/provision`,
+      decodeProvisionResponse,
+      jsonInit('POST', name === undefined || name === '' ? {} : { name }),
+    ),
+
+    pollProvision: attemptId => request(port, `${ROUTES.im}/provision/${encodeURIComponent(attemptId)}`, decodeProvisionResponse),
+
+    cancelProvision: attemptId => request(
+      port,
+      `${ROUTES.im}/provision/${encodeURIComponent(attemptId)}`,
+      decodeProvisionResponse,
+      jsonInit('DELETE'),
+    ),
+
+    removeBot: botId => request(
+      port,
+      `${ROUTES.im}/bots/${encodeURIComponent(botId)}`,
+      decodeBotsStatus,
+      jsonInit('DELETE'),
+    ),
   }
 }
