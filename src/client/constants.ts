@@ -38,5 +38,5 @@ export const POLL_INTERVAL_MS = 3_000
 /** 诊断条只保留最近一次的显示时长。 */
 export const FAILURE_STRIP_MS = 15_000
 
-/** 「联系作者」打开的仓库文档；公开地址，不依赖部署配置。 */
-export const CONTACT_DOC_URL = 'https://github.com/artaniszhou/dsh-atan-daily/blob/main/docs/CONTACT.md'
+/** 「联系作者」打开的官网主页（联系区在页面里）；公开地址，不依赖部署配置。 */
+export const CONTACT_URL = 'https://atandaily.cn/'

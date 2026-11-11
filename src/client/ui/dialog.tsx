@@ -32,6 +32,8 @@ export interface DialogProps {
   size?: 'md' | 'full'
   title: string
   subtitle?: string
+  /** 标题同一行的附加控件（例如弹窗自己的开关）。 */
+  headerExtra?: ReactNode
   /** 关闭按钮的无障碍名（沿用调用方语言的“关闭”文案）。 */
   closeLabel: string
   onClose: () => void
@@ -108,7 +110,7 @@ export function useDialog(onClose: () => void): {
 }
 
 /** 通用弹层。 */
-export function Dialog({ variant = 'modal', size = 'md', title, subtitle, closeLabel, onClose, children, footer }: DialogProps) {
+export function Dialog({ variant = 'modal', size = 'md', title, subtitle, headerExtra, closeLabel, onClose, children, footer }: DialogProps) {
   const { closeRef, cardRef, onOverlayClick } = useDialog(onClose)
   const full = size === 'full'
   return (
@@ -123,7 +125,10 @@ export function Dialog({ variant = 'modal', size = 'md', title, subtitle, closeL
       >
         <div className={css.head}>
           <div className={css.headText}>
-            <div className={css.dialogTitle}>{title}</div>
+            <div className={css.headRow}>
+              <div className={css.dialogTitle}>{title}</div>
+              {headerExtra === undefined ? null : <div className={css.headExtra}>{headerExtra}</div>}
+            </div>
             {subtitle === undefined ? null : <div className={css.dialogSubtitle}>{subtitle}</div>}
           </div>
           <IconButton ref={closeRef} label={closeLabel} onClick={onClose}>

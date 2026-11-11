@@ -14,6 +14,8 @@ import {
   type SettingsView,
   type TaskPatch,
   type TaskRecord,
+  type WorkspaceCheckResult,
+  type WorkspaceOption,
 } from '../../protocol.ts'
 import { browserHttp, type HttpPort } from '../platform/http.ts'
 import { HostError } from './errors.ts'
@@ -27,6 +29,8 @@ import {
   decodeSingleTask,
   decodeTaskList,
   decodeVoid,
+  decodeWorkspaceCheck,
+  decodeWorkspaceList,
 } from './guards.ts'
 import { request } from './http.ts'
 import {
@@ -62,6 +66,10 @@ export interface AtanDailyApi {
   listRuns(taskId: string, before?: string): Promise<RunRecord[]>
   openSession(taskId: string): Promise<string | undefined>
   loadSettings(): Promise<SettingsView>
+  /** 已注册工作区，含「atan-daily 用过」标记。 */
+  listWorkspaces(): Promise<WorkspaceOption[]>
+  /** 校验一个目录地址；无副作用。 */
+  checkWorkspace(workDir: string): Promise<WorkspaceCheckResult>
   /** 页面公告；`enabled=false` 表示当前没有公告。 */
   loadAnnouncement(): Promise<AnnouncementView>
   saveWorkDir(workDir: string | null): Promise<SettingsView>
@@ -136,6 +144,15 @@ export function createApi(port: HttpPort = browserHttp): AtanDailyApi {
     openSession: taskId => request(port, `${taskPath(taskId)}/session`, decodeSessionId, jsonInit('POST')),
 
     loadSettings: () => request(port, ROUTES.settings, decodeSettings),
+
+    listWorkspaces: () => request(port, ROUTES.workspaces, decodeWorkspaceList),
+
+    checkWorkspace: workDir => request(
+      port,
+      `${ROUTES.settings}/check`,
+      decodeWorkspaceCheck,
+      jsonInit('POST', { workDir }),
+    ),
 
     loadAnnouncement: () => request(port, ROUTES.announcement, decodeAnnouncement),
 

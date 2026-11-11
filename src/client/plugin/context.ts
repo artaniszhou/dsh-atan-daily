@@ -36,8 +36,6 @@ export interface ClientContext {
   /** 会话导航：选中一个会话并显示它的对话。 */
   uiWorkspace: {
     openSession: (target: string) => void
-    /** 打开宿主操作系统的目录选择器；取消时返回 null。 */
-    pickDirectory: () => Promise<string | null>
   }
   /** 面板导航：`null` 表示回到对话而不是全局面板。 */
   layout: {

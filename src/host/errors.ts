@@ -11,6 +11,7 @@ export type AppErrorCode =
   | 'not_found'
   | 'conflict'
   | 'no_workspace'
+  | 'workspace_registration_failed'
   | 'already_running'
   | 'run_failed'
   | 'internal'

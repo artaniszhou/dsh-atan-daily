@@ -1,0 +1,158 @@
+/** 「选择工作区」弹窗：搜索、列表、地址新建。 */
+
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.searchIcon {
+  position: absolute;
+  left: 9px;
+  display: flex;
+  color: var(--dsw-alias-label-tertiary);
+  pointer-events: none;
+}
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  padding-left: 30px;
+}
+.count {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.scope input {
+  margin: 0;
+}
+.list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--dsw-alias-border-secondary);
+  border-radius: var(--dsw-radius-md, 8px);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--dsw-alias-border-secondary);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.row:last-child {
+  border-bottom: 0;
+}
+.row:hover,
+.rowHighlight {
+  background: var(--dsw-alias-bg-layer-3, var(--dsw-alias-bg-layer-2));
+}
+.rowSelected,
+.rowSelected:hover {
+  background: var(--dsw-alias-bg-brand-secondary, var(--dsw-alias-bg-layer-3));
+}
+.rowMain {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.rowTitle {
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rowPath {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badges {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+}
+.badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-brand-secondary, var(--dsw-alias-bg-layer-3));
+  color: var(--dsw-alias-label-brand, var(--dsw-alias-label-primary));
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.section {
+  margin: 16px 0 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.pathInput {
+  width: 100%;
+  box-sizing: border-box;
+}
+.check {
+  min-height: 18px;
+  margin-top: 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  word-break: break-all;
+}
+.checkError {
+  color: var(--dsw-alias-state-error-primary);
+}
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.status strong {
+  color: var(--dsw-alias-label-secondary);
+  font-weight: 600;
+}
+.error {
+  margin-top: 8px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.switchHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.footerSpacer {
+  flex: 1;
+}

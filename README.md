@@ -24,14 +24,14 @@
 | --- | --- |
 | [产品设计](https://github.com/artaniszhou/dsh-atan-daily/blob/main/docs/PRODUCT.md) | 功能设计、使用方式、任务目录结构、飞书机器人、运行机制 |
 | [更新日志](https://github.com/artaniszhou/dsh-atan-daily/blob/main/docs/CHANGELOG.md) | 各版本的新增、变更、修复与兼容说明 |
-| [联系作者](https://github.com/artaniszhou/dsh-atan-daily/blob/main/docs/CONTACT.md) | QQ 交流群（群号 913085733）、提问须知与隐私约定 |
+| [联系作者](https://atandaily.cn/) | 官网主页：QQ 交流群（群号 913085733）、安装说明、提问须知与隐私约定 |
 
 ## 大致功能
 
 给每个选题一个目录、一份任务细节和一份文件索引，剩下的事按计划自动发生。
 
 - **定时执行**：执行时间可以说「每天 9 点」「每周一和周四 8 点」，也可以写五段 cron，或者只手动执行；每个任务单独设置 IANA 时区。
-- **首次使用先选工作目录**：插件不再自带默认目录。打开页面点「使用建议目录」（Windows 在「文档\DSH\atan-daily」，macOS 在 `~/DSH/atan-daily`）或自己选一个，选了才创建目录并注册为 DSH 工作区；没选之前任务列表为空、不能新建任务。
+- **首次使用先选工作区**：插件不再自带默认目录。打开页面点「使用建议工作区」（DSH 默认工作区父目录下的 `atan-daily`），或点「选择工作区…」从已注册工作区里选、或输入目录地址新建；选了才创建目录并注册为 DSH 工作区。没选之前任务列表为空、不能新建任务。
 - **一任务一目录**：每个选题一个文件夹，用户只写 `task-detail.md`，执行清单（命令、脚本、缓存）登记在 `.meta/task-pipeline.json`，改任务内容不用改代码。
 - **数据契约 + 模板渲染**：首轮生成 `.share/task-schema.json` 说清「要哪些数据、什么类型、怎么呈现」，之后每轮先核对明细再渲染成 PDF 或 PNG；报告是零脚本单文件，图表随窗口缩放。
 - **展示可微调**：在任务会话里直接说“地图点小一点、坐标表去掉、第三张图改柱状图”，`atan_daily_*` 工具会把要求编译成草稿并在聊天里给出改动后预览；用户确认后才写入 `.share/task-display.json` / `.share/task-schema.json`。全程不用改脚本，也不用重跑采集。
@@ -88,7 +88,7 @@ dsh plugin --profile web add .
 
 ## 反馈与贡献
 
-遇到问题或有建议，欢迎[提交 Issue](https://github.com/artaniszhou/dsh-atan-daily/issues)，也可以先看[联系作者](https://github.com/artaniszhou/dsh-atan-daily/blob/main/docs/CONTACT.md)。请附上 DSH 与插件版本、复现步骤，以及相关截图或日志；涉及选题规则时可先删去敏感内容。
+遇到问题或有建议，欢迎[提交 Issue](https://github.com/artaniszhou/dsh-atan-daily/issues)，也可以先看[官网](https://atandaily.cn/)或[联系作者](https://github.com/artaniszhou/dsh-atan-daily/blob/main/docs/CONTACT.md)。请附上 DSH 与插件版本、复现步骤，以及相关截图或日志；涉及选题规则时可先删去敏感内容。
 
 源码位于 `src`，使用严格 TypeScript，Host 与 Client 分开构建。改动后请执行：
 

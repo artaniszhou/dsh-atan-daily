@@ -1,7 +1,7 @@
 /**
- * 工作目录设置的唯一数据所有者。
+ * 工作区设置的唯一数据所有者。
  *
- * 读取、保存、创建目录三个动作都在这里；组件只负责编辑态的展示。
+ * 读取、保存、创建工作区三个动作都在这里；组件只负责编辑态的展示。
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { SettingsView } from '../../../protocol.ts'
@@ -25,7 +25,7 @@ export interface SettingsController {
 }
 
 /**
- * 读取并修改工作目录设置。
+ * 读取并修改工作区设置。
  * @param api - host 端点集合。
  * @param onChanged - 目录变化后的回调（页面借此重拉任务列表）。
  * @returns 设置状态与动作。

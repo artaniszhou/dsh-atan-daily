@@ -41,7 +41,7 @@ import { createScheduler } from './scheduling/scheduler.js'
 import { createSettingsDescriber } from './settings/describe.js'
 import { createSettingsFile } from './settings/file.js'
 import { createWorkspaceHub, type WorkspaceHub } from './settings/hub.js'
-import { suggestedWorkDir } from './settings/suggest.js'
+import { initialSuggestion, resolveSuggestedWorkspace } from './settings/suggest.js'
 import { createWorkspaceService } from './settings/workspace.js'
 import { createTask, type CreateTaskInput } from './tasks/create.js'
 import { renameTask } from './tasks/rename.js'
@@ -54,6 +54,7 @@ import { renderRunReport } from '../report/render/run.js'
 import { browserAvailable } from '../report/render/pdf.js'
 import { createTaskRoutes, parseTaskPath } from './http/tasks.js'
 import { createSettingsRoutes } from './http/settings.js'
+import { createWorkspaceRoutes } from './http/workspaces.js'
 import { registerAtanTools } from './tools/index.js'
 import { BotStore } from './im/store.js'
 import { createBotService } from './im/service.js'
@@ -153,7 +154,7 @@ async function startup(
   const workspace = hub.current()
   if (workspace === null) {
     // 未配置即空态：不建目录、不注册 Workspace、不跑调度。
-    logger.info('no working directory configured yet; waiting for the user to pick one')
+    logger.info('no workspace configured yet; waiting for the user to pick one')
   } else if (await isDirectory(workspace.root)) {
     await workspace.store.ensure().catch((error: unknown) => {
       logger.warn(`task list could not be prepared: ${String(error)}`)
@@ -175,7 +176,7 @@ async function startup(
  * @param ctx - Cordis 上下文。
  * @param config - 插件行配置。
  */
-export function apply(ctx: HostContext, config?: Config): void {
+export async function apply(ctx: HostContext, config?: Config): Promise<void> {
   const resolved = resolveConfig(config)
   const logger = createLogger(ctx.logger)
   const bootId = randomUUID()
@@ -210,12 +211,29 @@ export function apply(ctx: HostContext, config?: Config): void {
   }
 
   const workspaceService = createWorkspaceService({ workspaces, logger })
+  // 建议工作区先给「配置覆盖 / 家目录回退」的同步值，页面首次读取设置时再做一次
+  // 系统探测（默认工作区父目录 → Documents），避免插件启动被 PowerShell/osascript 拖住。
+  const initialSuggestionValue = initialSuggestion({ configured: resolved.configuredWorkDir })
   // 工作区是「目录 + 注册表」的同一来源：消费者只拿一个对象，不会拼错。
   const hub = createWorkspaceHub({
     settingsFile: createSettingsFile(resolved.settingsRoot),
     workspaces,
     prepare: (path, store) => workspaceService.prepare(path, store),
-    suggestedRoot: suggestedWorkDir({ configured: resolved.configuredWorkDir }),
+    suggestedRoot: initialSuggestionValue,
+    resolveSuggestion: async () => {
+      let rows: readonly { id: string, path?: string, title?: string }[] = []
+      try {
+        rows = workspaces.list()
+      } catch (error: unknown) {
+        logger.warn(`could not read the workspace registry for the suggestion: ${String(error)}`)
+      }
+      const next = await resolveSuggestedWorkspace({
+        configured: resolved.configuredWorkDir,
+        workspaces: rows,
+      })
+      logger.info(`suggested workspace ${next.path} (${next.source})`)
+      return next
+    },
     configuredWorkDir: resolved.configuredWorkDir,
     legacyWorkDir: resolved.legacyWorkDir,
     historyDays: resolved.historyDays,
@@ -373,8 +391,10 @@ export function apply(ctx: HostContext, config?: Config): void {
     hub,
     describer,
     scheduler,
+    workspaces,
     logger,
   })
+  const workspaceRoutes = createWorkspaceRoutes({ hub, workspaces })
   const botRoutes = createBotRoutes(bots)
 
   ctx.inject(['webServer'], (scope) => {
@@ -398,7 +418,9 @@ export function apply(ctx: HostContext, config?: Config): void {
       const disposers: Array<() => void> = [
         scope.webServer.register({ kind: 'exact', path: ROUTE, handler: collection }),
         scope.webServer.register({ kind: 'exact', path: SETTINGS_ROUTE, handler: guard(settingsRoutes.settings, logger) }),
+        scope.webServer.register({ kind: 'exact', path: `${SETTINGS_ROUTE}/check`, handler: guard(settingsRoutes.check, logger) }),
         scope.webServer.register({ kind: 'exact', path: `${SETTINGS_ROUTE}/directory`, handler: guard(settingsRoutes.directory, logger) }),
+        scope.webServer.register({ kind: 'exact', path: HOST_ROUTES.workspaces, handler: guard(workspaceRoutes.list, logger) }),
         scope.webServer.register({ kind: 'prefix', path: ROUTE, handler: item }),
         scope.webServer.register({ kind: 'prefix', path: HOST_ROUTES.taskHub, handler: guard(taskHub, logger) }),
         scope.webServer.register({ kind: 'exact', path: HOST_ROUTES.announcement, handler: guard(announcement.handler, logger) }),

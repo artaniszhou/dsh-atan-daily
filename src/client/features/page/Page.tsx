@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import type { TaskRecord } from '../../../protocol.ts'
 import type { AtanDailyApi } from '../../api/tasks.ts'
-import { CONTACT_DOC_URL } from '../../constants.ts'
+import { CONTACT_URL } from '../../constants.ts'
 import { t } from '../../i18n/index.ts'
 import { IconInbox, IconMessage, IconRobot } from '../../ui/icons.tsx'
 import { Button } from '../../ui/primitives.tsx'
@@ -33,12 +33,10 @@ export interface PageProps {
   navigate: (sessionId: string) => void
   /** 删除前的二次确认（由宿主/测试注入）。 */
   confirm: (message: string) => boolean
-  /** 打开宿主操作系统的目录选择器；取消时返回 null。 */
-  pickDirectory: () => Promise<string | null>
 }
 
 /** 中央页面。 */
-export function Page({ api, navigate, confirm, pickDirectory }: PageProps) {
+export function Page({ api, navigate, confirm }: PageProps) {
   const [listEpoch, setListEpoch] = useState<number>(0)
   const list = useTaskList(api, { onSession: navigate, confirm })
   // 目录切换后列表内容整体换了：清掉旧的搜索/页码，避免新任务被旧查询藏住。
@@ -70,10 +68,10 @@ export function Page({ api, navigate, confirm, pickDirectory }: PageProps) {
     setEditOf(null)
   }
 
-  /** 打开仓库里的「联系作者」文档；新标签页同步开窗，避免被当作非用户手势拦截。 */
+  /** 打开官网主页（QQ 群在「如何联系」一节）；新标签页同步开窗，避免被当作非用户手势拦截。 */
   const openContact = (): void => {
     setContactNotice('')
-    const opened = window.open(CONTACT_DOC_URL, '_blank')
+    const opened = window.open(CONTACT_URL, '_blank')
     if (opened === null) {
       setContactNotice('浏览器拦截了新标签页，请允许弹窗后重试。')
       return
@@ -82,7 +80,7 @@ export function Page({ api, navigate, confirm, pickDirectory }: PageProps) {
   }
 
   /** 设置还没加载完时按可用处理，避免首帧闪一下禁用态。 */
-  const workDirReady = settings.settings === null || settings.settings.workDirConfigured
+  const workDirReady = settings.settings === null || settings.settings.workspaceState === 'ready'
 
   return (
     <section className={css.root} aria-label={t('title')} data-testid="atan-daily-page">
@@ -142,13 +140,13 @@ export function Page({ api, navigate, confirm, pickDirectory }: PageProps) {
             ? null
             : (
               <SettingsLine
+                api={api}
                 settings={settings.settings}
                 saving={settings.saving}
                 note={settings.note}
                 onSave={settings.save}
                 onSaveServerUrl={settings.saveServerBaseUrl}
                 onCreateDir={settings.createDir}
-                onPick={pickDirectory}
               />
               )}
 

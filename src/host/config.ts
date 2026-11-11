@@ -85,8 +85,8 @@ export function isRunStatus(value: string | undefined): value is RunStatus {
 /** 插件行的配置。 */
 export interface Config {
   /**
-   * 建议工作目录：只作为页面「使用建议目录」的默认值与一次性迁移的候选，
-   * 不再是「用户没选就用它」。运行期的工作目录由页面选择后写进 `settings.json`。
+   * 建议工作区：只作为页面「使用建议工作区」的默认值与一次性迁移的候选，
+   * 不再是「用户没选就用它」。运行期的工作区由页面选择后写进 `settings.json`。
    */
   dataDir?: string
   /** 单次无人值守运行的上限（秒），默认 1800。 */
@@ -104,9 +104,9 @@ export interface Config {
 export interface ResolvedConfig {
   /** 插件固定的设置根；设置文件不能放在它指向的目录里。 */
   settingsRoot: string
-  /** yaml 的 `dataDir`：只用于迁移与建议目录，不再是默认工作目录。 */
+  /** yaml 的 `dataDir`：只用于迁移与建议工作区，不再是默认工作区。 */
   configuredWorkDir?: string
-  /** 旧版默认工作目录（插件数据目录）：只用于一次性迁移。 */
+  /** 旧版默认工作区（插件数据目录）：只用于一次性迁移。 */
   legacyWorkDir: string
   /** 新任务的默认保留天数。 */
   historyDays: number

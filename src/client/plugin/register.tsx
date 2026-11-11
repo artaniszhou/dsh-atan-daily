@@ -43,17 +43,6 @@ export function registerPlugin(ctx: ClientContext, api: AtanDailyApi): void {
     typeof window.confirm === 'function' ? window.confirm(message) : true
   )
 
-  /**
-   * 打开宿主操作系统的目录选择器。
-   * 老版本宿主没有这个方法时明确报错，避免按钮点了没反应。
-   */
-  const pickDirectory = async (): Promise<string | null> => {
-    if (typeof ctx.uiWorkspace.pickDirectory !== 'function') {
-      throw new Error('当前宿主不支持目录选择器')
-    }
-    return await ctx.uiWorkspace.pickDirectory()
-  }
-
   // 侧栏入口。
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
     name: 'sidebar.panellist',
@@ -65,7 +54,7 @@ export function registerPlugin(ctx: ClientContext, api: AtanDailyApi): void {
   // 中央页面：数据与导航通过闭包注入，组件本身不碰全局。
   const Panel = () => (
     <ErrorBoundary>
-      <Page api={api} navigate={navigate} confirm={confirm} pickDirectory={pickDirectory} />
+      <Page api={api} navigate={navigate} confirm={confirm} />
     </ErrorBoundary>
   )
   ctx.slots.inject('main', () => ctx.slots.register({

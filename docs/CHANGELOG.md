@@ -6,6 +6,31 @@
 >
 > 只在 npm 发布过的版本才单独成节。1.1.0 之后的开发期用过 1.3.0 / 1.4.0 / 2.x 等内部编号，均未发布，已并入 1.2.0。
 
+## 未发布
+
+**新增**
+
+- **「选择工作区」弹窗**：从已注册的 DSH 工作区里选，搜索框匹配标题与路径，`↑↓` / `Enter` 可用；列表默认只显示 atan-daily 用过的工作区（目录下有 `.task/`），当前工作区始终显示，可勾选「显示全部工作区」。
+- **用目录地址新建工作区**：同一个弹窗里输入绝对路径，Host 按**宿主平台**（Windows / macOS / Linux）校验并给出稳定错误码；目录不存在时创建，然后注册为工作区。注册失败即切换失败，不再出现「已保存但注册失败」。
+- **默认工作区**：建议值改为 `DSH 默认工作区父目录/atan-daily`（如 `<Documents>/deepseek-harness/atan-daily`）；优先从注册表里的 `default-workspace` 推导（尊重 `documentsDirectory`），其次探测系统 Documents，最后回退 `~/DSH/atan-daily`。仍然要点「使用建议工作区」才创建。
+- **「工作区已失效」态**：保存的目录不再是已注册工作区时，页面提示并可「重新注册」；重新注册前 Host 拒绝新建任务与运行（读任务列表仍可用）。
+- **纯函数路径校验**：`src/host/settings/paths.ts`，按平台检查完全限定、设备路径、非法字符、保留名、结尾空格/点、分段与总长度、设置目录保护。
+
+**变更**
+
+- **「联系作者」改跳官网**：按钮从打开仓库里的 `docs/CONTACT.md` 改为打开 [官网主页](https://atandaily.cn/)（QQ 群在「如何联系」一节，群号不变）；GitHub 上的 `CONTACT.md` 保留，供直接看仓库的人使用。
+- **术语**：工作目录 → **工作区**；选择目录 → **选择工作区**；使用建议目录 → **使用建议工作区**；创建工作目录 → **创建工作区**。页面、工具报错与文档同步。
+- **工作区 = DSH 工作区**：插件不再调用宿主目录选择器（`pickDirectory`），从根上避免 native / browse 组合差异；42 这类远程宿主与本地宿主走同一套弹窗。
+- **设置行只显示工作区标题**：路径不再内联；悬停标题看完整路径，点击标题复制路径并短暂提示「已复制」。
+- **注册语义收紧**：`switchTo` 在注册工作区失败时直接失败，`settings.json` 与当前工作区保持不变。
+- **canonical 路径**：保存与注册都用 `realpath` 后的路径，避免符号链接被重复注册成两个工作区。
+- **设置视图新增字段**：`hostPlatform`、`pathSeparator`、`defaultWorkspaceParent`、`suggestedWorkDirSource`、`workspaceState`；新增 `GET atan-daily/workspaces` 与 `POST atan-daily/settings/check`。
+
+**兼容**
+
+- `settings.json` 结构不变（仍存 `workDir`），已有用户的路径与数据不迁移、不改动。
+- `SettingsView.workspaceError` 保留给旧 Client；新路径不再产生它。
+
 ## 1.2.0（2026-11-11）
 
 **新增**

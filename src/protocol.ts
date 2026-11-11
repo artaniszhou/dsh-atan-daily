@@ -13,6 +13,7 @@
 export const ROUTES = {
   tasks: 'atan-daily/tasks',
   settings: 'atan-daily/settings',
+  workspaces: 'atan-daily/workspaces',
   im: 'atan-daily/im',
   taskHub: 'atan-daily/task-hub',
   announcement: 'atan-daily/announcement',
@@ -22,6 +23,7 @@ export const ROUTES = {
 export const HOST_ROUTES = {
   tasks: `/${ROUTES.tasks}`,
   settings: `/${ROUTES.settings}`,
+  workspaces: `/${ROUTES.workspaces}`,
   im: `/${ROUTES.im}`,
   taskHub: `/${ROUTES.taskHub}`,
   announcement: `/${ROUTES.announcement}`,
@@ -234,14 +236,77 @@ export interface WorkspaceRef {
   title: string
 }
 
+/** 可选工作区：设置页「选择工作区」列表的一行。 */
+export interface WorkspaceOption extends WorkspaceRef {
+  /** 工作区根目录（绝对路径）。 */
+  path: string
+  /** 是否是插件当前生效的工作区。 */
+  current: boolean
+  /** 该目录下是否存在 `.task/`（atan-daily 用过的工作区）。 */
+  hasData: boolean
+}
+
+/** 宿主平台；客户端据此切换路径示例，不参与校验。 */
+export type HostPlatform = 'win32' | 'darwin' | 'linux' | 'other'
+
+/** 当前工作区的状态。 */
+export type WorkspaceState = 'ready' | 'unregistered' | 'missing' | 'unset'
+
+/** 建议工作区来源。 */
+export type SuggestedWorkDirSource = 'config' | 'default-workspace' | 'documents' | 'fallback'
+
+/**
+ * 路径校验错误码。校验在 Host 侧按宿主平台执行，客户端只负责把 code 映射成文案。
+ */
+export type WorkspacePathErrorCode =
+  | 'path_empty'
+  | 'path_not_absolute'
+  | 'path_not_fully_qualified'
+  | 'path_device_form'
+  | 'path_forbidden_char'
+  | 'path_reserved_name'
+  | 'path_trailing_dot_space'
+  | 'path_component_too_long'
+  | 'path_too_long'
+  | 'path_not_a_directory'
+  | 'path_unreadable'
+  | 'path_in_settings_root'
+
+/** 目录地址校验结果；无副作用，不建目录、不注册。 */
+export type WorkspaceCheckResult =
+  | {
+    ok: true
+    /** 归一化后的绝对路径；已存在时是 canonical 路径。 */
+    normalized: string
+    /** 目录当前是否存在。 */
+    exists: boolean
+    /** 是否已经注册为 harness 工作区。 */
+    alreadyWorkspace: boolean
+    /** 是否就是当前生效的工作区。 */
+    isCurrent: boolean
+    /** 不存在、保存时会创建。 */
+    willCreate: boolean
+  }
+  | { ok: false, code: WorkspacePathErrorCode, detail?: string }
+
 /** 设置页读取与写回的工作目录视图。 */
 export interface SettingsView {
   /** 插件当前的工作目录，也是运行会话的 cwd；未配置时为空串。 */
   workDir: string
   /** 是否已经选过工作目录；false 时页面进入引导态，任务相关操作不可用。 */
   workDirConfigured: boolean
-  /** 「使用建议目录」按钮上的值；由宿主按平台计算。 */
+  /** 「使用建议工作区」按钮上的值；由宿主按平台计算。 */
   suggestedWorkDir: string
+  /** 建议值的来源，用于页面说明与排查。 */
+  suggestedWorkDirSource: SuggestedWorkDirSource
+  /** 建议值所在的父目录；用于展示与排查，取不到时为空串。 */
+  defaultWorkspaceParent: string
+  /** 宿主平台。 */
+  hostPlatform: HostPlatform
+  /** 宿主的路径分隔符，仅用于展示提示。 */
+  pathSeparator: '\\' | '/'
+  /** 当前工作区的状态：正常 / 注册被删 / 目录不存在 / 未配置。 */
+  workspaceState: WorkspaceState
   /** 已保存的工作目录覆盖；为空表示未配置。 */
   savedWorkDir: string
   /** 当前生效的任务仓库地址；空串表示未配置。 */
@@ -258,7 +323,7 @@ export interface SettingsView {
   workspace: WorkspaceRef | null
   /** 应答的 host 构建版本。 */
   pluginVersion?: string
-  /** 保存时目录已创建、但 Workspace 注册失败的原因。 */
+  /** 保存时目录已创建、但 Workspace 注册失败的原因（兼容字段，正常路径不再产生）。 */
   workspaceError?: string
   /** 当前宿主是否找到可用于 PNG/PDF 的 Chrome/Edge。 */
   browserAvailable: boolean

@@ -12,6 +12,7 @@ import type {
   BotsStatus,
   BotView,
   Frequency,
+  HostPlatform,
   ImChannel,
   OutputFormat,
   ProvisionState,
@@ -20,7 +21,12 @@ import type {
   RunStatus,
   ScheduleMode,
   SettingsView,
+  SuggestedWorkDirSource,
   TaskRecord,
+  WorkspaceCheckResult,
+  WorkspaceOption,
+  WorkspacePathErrorCode,
+  WorkspaceState,
 } from '../../protocol.ts'
 import { OUTPUT_FORMATS, PERMISSION_LEVELS } from '../../protocol.ts'
 import { HostError } from './errors.ts'
@@ -32,6 +38,15 @@ const SCHEDULE_MODES: readonly ScheduleMode[] = ['text', 'cron', 'manual']
 const IM_CHANNELS: readonly ImChannel[] = ['feishu']
 const PROVISION_STATES: readonly ProvisionState[] = [
   'starting', 'waiting', 'scanned', 'saving', 'connected', 'expired', 'failed', 'cancelled',
+]
+const HOST_PLATFORMS: readonly HostPlatform[] = ['win32', 'darwin', 'linux', 'other']
+const WORKSPACE_STATES: readonly WorkspaceState[] = ['ready', 'unregistered', 'missing', 'unset']
+const SUGGESTED_SOURCES: readonly SuggestedWorkDirSource[] = ['config', 'default-workspace', 'documents', 'fallback']
+const PATH_ERROR_CODES: readonly WorkspacePathErrorCode[] = [
+  'path_empty', 'path_not_absolute', 'path_not_fully_qualified', 'path_device_form',
+  'path_forbidden_char', 'path_reserved_name', 'path_trailing_dot_space',
+  'path_component_too_long', 'path_too_long', 'path_not_a_directory',
+  'path_unreadable', 'path_in_settings_root',
 ]
 
 /** 统一的解码失败。 */
@@ -58,6 +73,11 @@ function optString(record: Record<string, unknown>, key: string): string | undef
   if (value === undefined || value === null) return undefined
   if (typeof value !== 'string') fail(`字段 ${key} 不是字符串`)
   return value
+}
+
+/** 从闭集里取一个值；不认识时用兜底值（兼容旧 Host）。 */
+function choose<T extends string>(values: readonly T[], value: string | undefined, fallback: T): T {
+  return value !== undefined && (values as readonly string[]).includes(value) ? value as T : fallback
 }
 
 /** 必填布尔值。 */
@@ -232,23 +252,88 @@ export function decodeSettings(payload: unknown): SettingsView {
   }
   const pluginVersion = optString(record, 'pluginVersion')
   const workspaceError = optString(record, 'workspaceError')
+  const workDirConfigured = optBool(record, 'workDirConfigured') ?? true
+  const dirExists = reqBool(record, 'dirExists')
+  const suggestedWorkDir = optString(record, 'suggestedWorkDir') ?? ''
+  // 旧 Host 没有平台字段：从建议路径的分隔符猜一个，至少占位符是对的。
+  const hostPlatform = choose(
+    HOST_PLATFORMS,
+    optString(record, 'hostPlatform'),
+    suggestedWorkDir.includes('\\') ? 'win32' : 'other',
+  )
   return {
     workDir: optString(record, 'workDir') ?? '',
-    workDirConfigured: optBool(record, 'workDirConfigured') ?? true,
-    suggestedWorkDir: optString(record, 'suggestedWorkDir') ?? '',
-    savedWorkDir: optString(record, 'savedWorkDir') ?? '',
+    workDirConfigured,
+    suggestedWorkDir,
+    suggestedWorkDirSource: choose(SUGGESTED_SOURCES, optString(record, 'suggestedWorkDirSource'), 'fallback'),
+    defaultWorkspaceParent: optString(record, 'defaultWorkspaceParent') ?? '',
+    hostPlatform,
+    pathSeparator: record['pathSeparator'] === '\\' || (record['pathSeparator'] === undefined && hostPlatform === 'win32') ? '\\' : '/',
+    // 旧 Host 没有状态字段：按「已配置 + 目录存在」推断，避免整页报错。
+    workspaceState: choose(
+      WORKSPACE_STATES,
+      optString(record, 'workspaceState'),
+      workDirConfigured ? (dirExists ? 'ready' : 'missing') : 'unset',
+    ),
     // Host 与 Client 版本可能短暂错位（Client 刷新即生效、Host 要重启），
     // 缺这三个字段时按「未配置」处理，不整页报错。
+    savedWorkDir: optString(record, 'savedWorkDir') ?? '',
     serverBaseUrl: optString(record, 'serverBaseUrl') ?? '',
     savedServerBaseUrl: optString(record, 'savedServerBaseUrl') ?? '',
     defaultServerBaseUrl: optString(record, 'defaultServerBaseUrl') ?? '',
     tasksTotal: reqNumber(record, 'tasksTotal'),
     tasksEnabled: reqNumber(record, 'tasksEnabled'),
-    dirExists: reqBool(record, 'dirExists'),
+    dirExists,
     browserAvailable: reqBool(record, 'browserAvailable'),
     workspace,
     ...(pluginVersion === undefined ? {} : { pluginVersion }),
     ...(workspaceError === undefined ? {} : { workspaceError }),
+  }
+}
+
+/**
+ * 解码工作区列表。
+ * @param payload - `GET /atan-daily/workspaces` 的响应体。
+ * @returns 工作区行。
+ */
+export function decodeWorkspaceList(payload: unknown): WorkspaceOption[] {
+  const record = asRecord(payload, 'response')
+  if (!Array.isArray(record.workspaces)) fail('字段 workspaces 不是数组')
+  return record.workspaces.map((value) => {
+    const row = asRecord(value, 'workspace')
+    return {
+      id: reqString(row, 'id'),
+      title: reqString(row, 'title'),
+      path: reqString(row, 'path'),
+      current: reqBool(row, 'current'),
+      hasData: reqBool(row, 'hasData'),
+    }
+  })
+}
+
+/**
+ * 解码目录地址校验结果。
+ * @param payload - `POST /atan-daily/settings/check` 的响应体。
+ * @returns 校验结果。
+ */
+export function decodeWorkspaceCheck(payload: unknown): WorkspaceCheckResult {
+  const record = asRecord(payload, 'check')
+  if (record['ok'] === false) {
+    const detail = optString(record, 'detail')
+    return {
+      ok: false,
+      code: choose(PATH_ERROR_CODES, optString(record, 'code'), 'path_unreadable'),
+      ...(detail === undefined ? {} : { detail }),
+    }
+  }
+  if (record['ok'] !== true) fail('字段 ok 不是布尔值')
+  return {
+    ok: true,
+    normalized: reqString(record, 'normalized'),
+    exists: reqBool(record, 'exists'),
+    alreadyWorkspace: reqBool(record, 'alreadyWorkspace'),
+    isCurrent: reqBool(record, 'isCurrent'),
+    willCreate: reqBool(record, 'willCreate'),
   }
 }
 

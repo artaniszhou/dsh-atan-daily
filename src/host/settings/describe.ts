@@ -6,10 +6,11 @@
  */
 
 import { stat } from 'node:fs/promises'
-import type { SettingsView } from '../../protocol.js'
+import type { SettingsView, WorkspaceState } from '../../protocol.js'
 import type { TaskRepository } from '../repository.js'
 import type { WorkspacePort } from '../ports.js'
 import type { WorkspaceHub } from './hub.js'
+import { hostPlatformOf } from './paths.js'
 import { workspaceAt } from './workspace.js'
 
 /** 设置视图服务。 */
@@ -36,8 +37,11 @@ export interface SettingsDescriberDeps {
 export function createSettingsDescriber(deps: SettingsDescriberDeps): SettingsDescriber {
   return {
     async describe(): Promise<SettingsView> {
+      // 建议值可能依赖一次系统探测；只在首次读取设置时等它。
+      await deps.hub.suggestion()
       const snapshot = deps.hub.snapshot()
       const workspace = deps.hub.current()
+      const registered = workspace === null ? undefined : workspaceAt(deps.workspaces, workspace.root)
       let dirExists = false
       if (workspace !== null) {
         try {
@@ -46,6 +50,11 @@ export function createSettingsDescriber(deps: SettingsDescriberDeps): SettingsDe
           dirExists = false
         }
       }
+      // 「注册被删」与「目录被删」是两种不同的页面态：前者可以重新注册，
+      // 后者可以重新创建目录。
+      const workspaceState: WorkspaceState = workspace === null
+        ? 'unset'
+        : !dirExists ? 'missing' : registered === undefined ? 'unregistered' : 'ready'
       let tasksTotal = 0
       let tasksEnabled = 0
       // Only count when the workspace exists: a missing directory is an empty
@@ -63,6 +72,11 @@ export function createSettingsDescriber(deps: SettingsDescriberDeps): SettingsDe
         workDir: snapshot.workDir,
         workDirConfigured: snapshot.workDirConfigured,
         suggestedWorkDir: snapshot.suggestedWorkDir,
+        suggestedWorkDirSource: snapshot.suggestedWorkDirSource,
+        defaultWorkspaceParent: snapshot.defaultWorkspaceParent,
+        hostPlatform: hostPlatformOf(),
+        pathSeparator: process.platform === 'win32' ? '\\' : '/',
+        workspaceState,
         savedWorkDir: snapshot.savedWorkDir,
         serverBaseUrl: snapshot.serverBaseUrl,
         savedServerBaseUrl: snapshot.savedServerBaseUrl,
@@ -70,7 +84,7 @@ export function createSettingsDescriber(deps: SettingsDescriberDeps): SettingsDe
         tasksTotal,
         tasksEnabled,
         dirExists,
-        workspace: workspace === null ? null : workspaceAt(deps.workspaces, workspace.root) ?? null,
+        workspace: registered ?? null,
         pluginVersion: deps.pluginVersion,
         browserAvailable: deps.browserAvailable(),
       }

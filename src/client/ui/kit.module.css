@@ -399,6 +399,21 @@
 .headText {
   min-width: 0;
 }
+.headRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.headExtra {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
 .dialogTitle {
   color: var(--dsw-alias-label-primary);
   font-size: 16px;

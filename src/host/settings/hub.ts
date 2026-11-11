@@ -1,23 +1,40 @@
 /**
- * 当前工作区：把「工作目录 + 任务注册表」合成一个不可变快照。
+ * 当前工作区：把「工作区路径 + 任务注册表」合成一个不可变快照。
  *
  * 消费者只依赖 {@link WorkspaceProvider}，不再各自接收 `store` 与 `workDir` 两个参数，
  * 也就不会出现「两个值来自不同目录」的组合。「未配置」是一等状态：`current()` 为
  * `null`，写操作由 {@link WorkspaceProvider.require} 统一抛错，文案只有一份。
  */
 
-import { readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, readdir, realpath, stat } from 'node:fs/promises'
+import { join, normalize } from 'node:path'
+import type { SuggestedWorkDirSource } from '../../protocol.js'
 import { TASK_DETAIL_NAME, taskStateDir } from '../../core/documents.js'
 import { TASK_LIST_FILE, TaskListStore } from '../../core/task-list.js'
 import { AppError } from '../errors.js'
 import { normalizeBaseUrl } from '../config.js'
 import type { Logger, WorkspacePort } from '../ports.js'
 import type { SavedSettings, SettingsFile } from './file.js'
-import type { PreparedWorkDir } from './workspace.js'
+import { workspaceAt, type PreparedWorkDir } from './workspace.js'
+import type { WorkspaceSuggestion } from './suggest.js'
 
-/** 未配置工作目录时的统一文案。 */
-export const NO_WORKSPACE_MESSAGE = '还没有选择工作目录：先在工作目录一栏点「选择目录」或「使用建议目录」'
+/** 未配置工作区时的统一文案。 */
+export const NO_WORKSPACE_MESSAGE = '还没有选择工作区：先在工作区一栏点「选择工作区」或「使用建议工作区」'
+/** 工作区注册被删除时的统一文案。 */
+export const NO_WORKSPACE_UNREGISTERED_MESSAGE = '当前工作区的注册已被删除：先点「重新注册」或重新选择工作区'
+
+/**
+ * 目录的 canonical 路径；目录不存在时只做归一化。
+ * @param path - 绝对路径。
+ * @returns 可注册、可比较的路径。
+ */
+async function canonicalPath(path: string): Promise<string> {
+  try {
+    return await realpath(path)
+  } catch {
+    return normalize(path)
+  }
+}
 
 /** 一个工作区快照：路径与注册表同一来源。 */
 export interface Workspace {
@@ -48,6 +65,8 @@ export interface SettingsSnapshot {
   workDir: string
   savedWorkDir: string
   suggestedWorkDir: string
+  suggestedWorkDirSource: SuggestedWorkDirSource
+  defaultWorkspaceParent: string
   workDirConfigured: boolean
   serverBaseUrl: string
   savedServerBaseUrl: string
@@ -60,6 +79,8 @@ export interface WorkspaceHub extends WorkspaceProvider {
   settings(): SavedSettings
   /** 设置页视图。 */
   snapshot(): SettingsSnapshot
+  /** 建议工作区；首次调用会等待一次系统探测，之后返回缓存。 */
+  suggestion(): Promise<WorkspaceSuggestion>
   /** 当前生效的任务仓库地址。 */
   serverBaseUrl(): string
   /** 保存任务仓库地址覆盖；null 或空串表示清除覆盖。 */
@@ -80,8 +101,10 @@ export interface WorkspaceHubDeps {
   workspaces: WorkspacePort
   /** 建目录、确保注册表并注册 Workspace。 */
   prepare: (path: string, store: TaskListStore) => Promise<PreparedWorkDir>
-  /** 平台建议目录。 */
-  suggestedRoot: string
+  /** 建议工作区（路径 + 父目录 + 来源）；先给初始值，首次读取时再探测。 */
+  suggestedRoot: WorkspaceSuggestion
+  /** 完整探测（系统 Documents 等）；缺省表示只用初始值。 */
+  resolveSuggestion?: () => Promise<WorkspaceSuggestion>
   /** yaml 的 `dataDir`：迁移候选之一，也是建议值的覆盖来源。 */
   configuredWorkDir?: string
   /** 旧版默认目录（插件数据目录）：迁移候选之一。 */
@@ -126,6 +149,8 @@ async function hasTasks(root: string): Promise<boolean> {
 export function createWorkspaceHub(deps: WorkspaceHubDeps): WorkspaceHub {
   let saved: SavedSettings = {}
   let current: Workspace | null = null
+  let suggestion = deps.suggestedRoot
+  let suggestionPending: Promise<WorkspaceSuggestion> | undefined
   const listeners = new Set<(workspace: Workspace | null) => void>()
 
   function createStore(root: string): TaskListStore {
@@ -161,9 +186,26 @@ export function createWorkspaceHub(deps: WorkspaceHubDeps): WorkspaceHub {
     current: () => current,
     require(): Workspace {
       if (current === null) throw new AppError('no_workspace', 409, NO_WORKSPACE_MESSAGE)
+      // 不变式：生效的工作区必须是已注册工作区。注册被外部删除后，写入与运行
+      // 一律拒绝，直到用户显式「重新注册」。
+      if (workspaceAt(deps.workspaces, current.root) === undefined) {
+        throw new AppError('no_workspace', 409, NO_WORKSPACE_UNREGISTERED_MESSAGE)
+      }
       return current
     },
-    suggestedRoot: () => deps.configuredWorkDir ?? deps.suggestedRoot,
+    suggestedRoot: () => suggestion.path,
+    suggestion(): Promise<WorkspaceSuggestion> {
+      if (suggestionPending === undefined) {
+        const probe = deps.resolveSuggestion
+        suggestionPending = (probe === undefined ? Promise.resolve(suggestion) : probe())
+          .then((next) => {
+            suggestion = next
+            return next
+          })
+          .catch(() => suggestion)
+      }
+      return suggestionPending
+    },
     onChange(listener): () => void {
       listeners.add(listener)
       return () => {
@@ -176,7 +218,9 @@ export function createWorkspaceHub(deps: WorkspaceHubDeps): WorkspaceHub {
       return {
         workDir: workspace?.root ?? '',
         savedWorkDir: saved.workDir ?? '',
-        suggestedWorkDir: deps.configuredWorkDir ?? deps.suggestedRoot,
+        suggestedWorkDir: suggestion.path,
+        suggestedWorkDirSource: suggestion.source,
+        defaultWorkspaceParent: suggestion.parent,
         workDirConfigured: workspace !== null,
         serverBaseUrl: saved.serverBaseUrl ?? deps.defaultServerBaseUrl,
         savedServerBaseUrl: saved.serverBaseUrl ?? '',
@@ -194,8 +238,11 @@ export function createWorkspaceHub(deps: WorkspaceHubDeps): WorkspaceHub {
     async load(): Promise<void> {
       saved = await deps.settingsFile.load()
       if (saved.workDir !== undefined) {
-        adopt(saved.workDir)
-        deps.logger.info(`working directory ${saved.workDir}`)
+        // 历史版本可能存了符号链接或非 canonical 路径；注册表用 canonical 路径，
+        // 这里对齐一次，避免把「已注册」误判成「注册被删」。
+        const root = await canonicalPath(saved.workDir)
+        adopt(root)
+        deps.logger.info(`working workspace ${root}`)
         return
       }
       // 一次性迁移：老用户没有保存过覆盖、任务却在历史默认目录里，沿用并写回，
@@ -208,19 +255,27 @@ export function createWorkspaceHub(deps: WorkspaceHubDeps): WorkspaceHub {
         })
         saved = next
         adopt(candidate)
-        deps.logger.info(`沿用已有工作目录 ${candidate}`)
+        deps.logger.info(`沿用已有工作区 ${candidate}`)
         return
       }
-      deps.logger.info('no working directory configured yet')
+      deps.logger.info('no workspace configured yet')
     },
     async switchTo(root: string): Promise<PreparedWorkDir> {
-      const store = createStore(root)
+      // 先建目录再取 canonical：叶子不存在时 realpath 会失败；父目录是符号链接时，
+      // 注册表会存 canonical 路径，插件若存原样路径就会被误判成「注册被删」。
+      await mkdir(root, { recursive: true })
+      const target = await canonicalPath(root)
+      const store = createStore(target)
       // 先准备目录与注册表：失败时当前快照保持原样。
-      const prepared = await deps.prepare(root, store)
-      const next: SavedSettings = { ...saved, workDir: root }
+      const prepared = await deps.prepare(target, store)
+      // 不变式要求「生效的必须是工作区」：注册失败即切换失败，不落盘。
+      if (prepared.workspaceError !== undefined) {
+        throw new AppError('workspace_registration_failed', 500, `注册工作区失败：${prepared.workspaceError}`)
+      }
+      const next: SavedSettings = { ...saved, workDir: target }
       await deps.settingsFile.save(next)
       saved = next
-      current = { root, store }
+      current = { root: target, store }
       emit()
       return prepared
     },

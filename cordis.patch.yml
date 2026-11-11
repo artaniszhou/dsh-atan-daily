@@ -2,11 +2,11 @@
 # bundle is enabled.
 #
 # Fields (all optional):
-#   dataDir            suggested working directory, where task folders live. It is
-#                      only used for the page's 「使用建议目录」 button and for the
+#   dataDir            suggested workspace, where task folders live. It is
+#                      only used for the page's 「使用建议工作区」 button and for the
 #                      one-time migration of old installs; it is NOT an automatic
 #                      default. Nothing is created or registered until the user
-#                      picks a directory on the page (or accepts this suggestion),
+#                      picks a workspace on the page (or accepts this suggestion),
 #                      and the choice is persisted in settings.json.
 #   runTimeoutSeconds  bound on one unattended run (default 1800)
 #   historyDays        default days of run history for new tasks
