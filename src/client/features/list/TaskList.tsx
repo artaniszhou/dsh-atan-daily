@@ -104,7 +104,7 @@ export function TaskList(props: TaskListProps) {
       <ul id="atan-daily-task-list" className={css.list} aria-label={t('listLabel')}>
         {paged.visible.map(task => (
           <TaskRow
-            key={task.id}
+            key={task.taskId}
             task={task}
             bots={bots}
             onRun={() => { onRun(task) }}

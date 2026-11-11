@@ -1,18 +1,15 @@
 /**
  * 工作目录与 Workspace。
  *
- * 保存目录时只做三件事：`mkdir`、`store.ensure`、注册 Workspace。
- * legacy 迁移只对插件自有目录（`settingsRoot` 下或配置的 defaultWorkDir）执行，
- * 任意用户仓库目录不会被移动文件。
+ * 只做三件事：`mkdir`、`store.ensure`、注册 Workspace。它不认识设置文件，
+ * 「当前是哪个目录」由 `settings/hub` 决定，这里只按传入的路径干活。
  */
 
 import { mkdir } from 'node:fs/promises'
-import { normalize, sep } from 'node:path'
-import { TaskListStore } from '../../core/task-list.js'
+import { normalize } from 'node:path'
+import type { TaskListStore } from '../../core/task-list.js'
 import type { WorkspaceRef } from '../../protocol.js'
-import { ensureTaskLayout } from '../migration.js'
 import type { Logger, WorkspacePort } from '../ports.js'
-import type { SettingsStore } from './store.js'
 
 /** 准备目录的结果。 */
 export interface PreparedWorkDir {
@@ -24,8 +21,8 @@ export interface PreparedWorkDir {
 export interface WorkspaceService {
   /** 路径上已注册的 Workspace。 */
   at(path: string): WorkspaceRef | undefined
-  /** 建目录、确保注册表、按需迁移并注册 Workspace。 */
-  prepare(path: string): Promise<PreparedWorkDir>
+  /** 建目录、确保注册表并注册 Workspace。 */
+  prepare(path: string, store: TaskListStore): Promise<PreparedWorkDir>
 }
 
 /**
@@ -60,61 +57,20 @@ export function workspaceAt(workspaces: WorkspacePort, path: string): WorkspaceR
 }
 
 /**
- * 一个目录是否属于插件可安全迁移的范围。
- *
- * `settingsRoot` 下的目录一定是插件自己的；配置的 defaultWorkDir 视为管理员
- * 显式指定，也允许迁移。其他用户目录一律不动。
- * @param settingsRoot - 插件固定设置根。
- * @param defaultWorkDir - 配置的默认工作目录。
- * @param path - 待判断目录。
- * @returns true 表示可迁移。
- */
-export function isPluginOwned(settingsRoot: string, defaultWorkDir: string, path: string): boolean {
-  const target = pathKey(path)
-  for (const root of [settingsRoot, defaultWorkDir]) {
-    const base = pathKey(root)
-    if (target === base || target.startsWith(`${base}${sep}`)) return true
-  }
-  return false
-}
-
-/**
  * 创建 Workspace 服务。
- * @param deps - 设置服务、Workspace 端口与日志。
+ * @param deps - Workspace 端口与日志。
  * @returns Workspace 服务。
  */
 export function createWorkspaceService(deps: {
-  settings: SettingsStore
   workspaces: WorkspacePort
   logger: Logger
 }): WorkspaceService {
-  // 同一次激活里对同一目录只迁移一次。
-  const migrated = new Set<string>()
-
-  function storeFor(path: string): TaskListStore {
-    if (path === deps.settings.workDir()) return deps.settings.store()
-    return new TaskListStore(path, {
-      defaultHistoryDays: deps.settings.historyDays,
-      warn: (message: string) => {
-        deps.logger.warn(message)
-      },
-    })
-  }
-
   return {
     at(path: string): WorkspaceRef | undefined {
       return workspaceAt(deps.workspaces, path)
     },
-    async prepare(path: string): Promise<PreparedWorkDir> {
+    async prepare(path: string, store: TaskListStore): Promise<PreparedWorkDir> {
       await mkdir(path, { recursive: true })
-      const owned = isPluginOwned(deps.settings.settingsRoot, deps.settings.defaultWorkDir, path)
-      if (owned && !migrated.has(path)) {
-        await ensureTaskLayout(path, deps.logger).catch((error: unknown) => {
-          deps.logger.warn(`task layout for ${path} could not be prepared: ${String(error)}`)
-        })
-        migrated.add(path)
-      }
-      const store = storeFor(path)
       await store.ensure().catch((error: unknown) => {
         deps.logger.warn(`task list for ${path} could not be prepared: ${String(error)}`)
       })

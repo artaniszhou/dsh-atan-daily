@@ -9,7 +9,7 @@ import { AppError, appErrorOf, errorBodyOf } from '../errors.js'
 import type { Logger, RouteHandler, RouteRequest, RouteResponse } from '../ports.js'
 
 /** 单次请求体上限。 */
-const MAX_BODY_BYTES = 2 * 1024 * 1024
+const MAX_BODY_BYTES = 22 * 1024 * 1024
 
 /**
  * 写一条 JSON 响应。

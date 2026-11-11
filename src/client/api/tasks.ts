@@ -7,6 +7,7 @@
 import {
   ROUTES,
   RUN_PAGE_SIZE,
+  type AnnouncementView,
   type BotsStatus,
   type ProvisionView,
   type RunRecord,
@@ -17,6 +18,7 @@ import {
 import { browserHttp, type HttpPort } from '../platform/http.ts'
 import { HostError } from './errors.ts'
 import {
+  decodeAnnouncement,
   decodeBotsStatus,
   decodeProvisionResponse,
   decodeRunList,
@@ -27,6 +29,19 @@ import {
   decodeVoid,
 } from './guards.ts'
 import { request } from './http.ts'
+import {
+  decodeTaskHubDetail,
+  decodeTaskHubLoadedTask,
+  decodeTaskHubPreview,
+  decodeTaskHubSubmit,
+  decodeTaskHubWarehouse,
+  type TaskHubLoadInput,
+  type TaskHubPreview,
+  type TaskHubSubmitInput,
+  type TaskHubSubmitResult,
+  type TaskHubTaskDetail,
+  type TaskHubWarehouse,
+} from './task-hub.ts'
 
 /** 新建任务的入参。 */
 export interface CreateTaskInput {
@@ -41,13 +56,17 @@ export interface CreateTaskInput {
 export interface AtanDailyApi {
   listTasks(): Promise<TaskRecord[]>
   createTask(input: CreateTaskInput): Promise<TaskRecord>
-  patchTask(id: string, patch: TaskPatch): Promise<TaskRecord>
-  deleteTask(id: string): Promise<void>
-  runTask(id: string): Promise<string | undefined>
-  listRuns(id: string, before?: string): Promise<RunRecord[]>
-  openSession(id: string): Promise<string | undefined>
+  patchTask(taskId: string, patch: TaskPatch): Promise<TaskRecord>
+  deleteTask(taskId: string): Promise<void>
+  runTask(taskId: string): Promise<string | undefined>
+  listRuns(taskId: string, before?: string): Promise<RunRecord[]>
+  openSession(taskId: string): Promise<string | undefined>
   loadSettings(): Promise<SettingsView>
+  /** 页面公告；`enabled=false` 表示当前没有公告。 */
+  loadAnnouncement(): Promise<AnnouncementView>
   saveWorkDir(workDir: string | null): Promise<SettingsView>
+  /** 保存任务仓库地址；null 清除覆盖、回到 yaml 默认值。 */
+  saveServerBaseUrl(serverBaseUrl: string | null): Promise<SettingsView>
   createDirectory(): Promise<SettingsView>
   /** 机器人列表 + 进行中的扫码。 */
   loadBots(): Promise<BotsStatus>
@@ -59,6 +78,16 @@ export interface AtanDailyApi {
   cancelProvision(attemptId: string): Promise<ProvisionView>
   /** 移除接入（只断开本机；飞书应用需用户自行删除）。 */
   removeBot(botId: string): Promise<BotsStatus>
+  /** 预览将要提交的任务包（文件 + 元信息合并后的 JSON）；未登录时由 Host 拒绝。 */
+  previewTaskUpload(input: TaskHubSubmitInput): Promise<TaskHubPreview>
+  /** 提交任务包到任务管理服务。 */
+  submitTask(input: TaskHubSubmitInput): Promise<TaskHubSubmitResult>
+  /** 已上架任务列表。 */
+  listTaskWarehouse(input: { q?: string, sort?: string, page?: number, pageSize?: number }): Promise<TaskHubWarehouse>
+  /** 已上架任务详情（不含提交者身份）。 */
+  detailTaskHubTask(publicId: string): Promise<TaskHubTaskDetail>
+  /** 把上架任务复制成本地任务。 */
+  loadRemoteTask(input: TaskHubLoadInput): Promise<TaskRecord>
 }
 
 /** 带 JSON 头的请求初始化。 */
@@ -76,18 +105,18 @@ function jsonInit(method: string, body?: unknown): { method: string, headers: Re
  * @returns 类型化的端点集合。
  */
 export function createApi(port: HttpPort = browserHttp): AtanDailyApi {
-  const taskPath = (id: string): string => `${ROUTES.tasks}/${encodeURIComponent(id)}`
+  const taskPath = (taskId: string): string => `${ROUTES.tasks}/${encodeURIComponent(taskId)}`
 
   return {
     listTasks: () => request(port, ROUTES.tasks, decodeTaskList),
 
     createTask: input => request(port, ROUTES.tasks, decodeSingleTask, jsonInit('POST', input)),
 
-    patchTask: (id, patch) => request(port, taskPath(id), decodeSingleTask, jsonInit('PATCH', patch)),
+    patchTask: (taskId, patch) => request(port, taskPath(taskId), decodeSingleTask, jsonInit('PATCH', patch)),
 
-    deleteTask: async (id) => {
+    deleteTask: async (taskId) => {
       try {
-        await request(port, taskPath(id), decodeVoid, jsonInit('DELETE'))
+        await request(port, taskPath(taskId), decodeVoid, jsonInit('DELETE'))
       } catch (error) {
         // 目录已经不存在，等价于删除成功。
         if (error instanceof HostError && error.code === 'not-found') return
@@ -95,20 +124,29 @@ export function createApi(port: HttpPort = browserHttp): AtanDailyApi {
       }
     },
 
-    runTask: id => request(port, `${taskPath(id)}/run`, decodeSessionId, jsonInit('POST')),
+    runTask: taskId => request(port, `${taskPath(taskId)}/run`, decodeSessionId, jsonInit('POST')),
 
-    listRuns: (id, before) => {
+    listRuns: (taskId, before) => {
       const query = before === undefined
         ? `?limit=${String(RUN_PAGE_SIZE)}`
         : `?limit=${String(RUN_PAGE_SIZE)}&before=${encodeURIComponent(before)}`
-      return request(port, `${taskPath(id)}/runs${query}`, decodeRunList)
+      return request(port, `${taskPath(taskId)}/runs${query}`, decodeRunList)
     },
 
-    openSession: id => request(port, `${taskPath(id)}/session`, decodeSessionId, jsonInit('POST')),
+    openSession: taskId => request(port, `${taskPath(taskId)}/session`, decodeSessionId, jsonInit('POST')),
 
     loadSettings: () => request(port, ROUTES.settings, decodeSettings),
 
+    loadAnnouncement: () => request(port, ROUTES.announcement, decodeAnnouncement),
+
     saveWorkDir: workDir => request(port, ROUTES.settings, decodeSettings, jsonInit('PATCH', { workDir })),
+
+    saveServerBaseUrl: serverBaseUrl => request(
+      port,
+      ROUTES.settings,
+      decodeSettings,
+      jsonInit('PATCH', { serverBaseUrl }),
+    ),
 
     createDirectory: () => request(port, `${ROUTES.settings}/directory`, decodeSettings, jsonInit('POST')),
 
@@ -135,6 +173,41 @@ export function createApi(port: HttpPort = browserHttp): AtanDailyApi {
       `${ROUTES.im}/bots/${encodeURIComponent(botId)}`,
       decodeBotsStatus,
       jsonInit('DELETE'),
+    ),
+
+    previewTaskUpload: input => request(
+      port,
+      `${ROUTES.taskHub}/preview`,
+      decodeTaskHubPreview,
+      jsonInit('POST', input),
+    ),
+
+    submitTask: input => request(
+      port,
+      `${ROUTES.taskHub}/submit`,
+      decodeTaskHubSubmit,
+      jsonInit('POST', input),
+    ),
+
+    listTaskWarehouse: input => request(
+      port,
+      `${ROUTES.taskHub}/warehouse`,
+      decodeTaskHubWarehouse,
+      jsonInit('POST', input),
+    ),
+
+    detailTaskHubTask: publicId => request(
+      port,
+      `${ROUTES.taskHub}/detail`,
+      decodeTaskHubDetail,
+      jsonInit('POST', { publicId }),
+    ),
+
+    loadRemoteTask: input => request(
+      port,
+      `${ROUTES.taskHub}/load`,
+      decodeTaskHubLoadedTask,
+      jsonInit('POST', input),
     ),
   }
 }

@@ -42,7 +42,7 @@ export function createRunRecovery(deps: RunRecoveryDeps): RunRecovery {
         try {
           records = await listRunsSince(task.folder, since)
         } catch (error: unknown) {
-          deps.logger.warn(`could not scan runs of ${task.id}: ${String(error)}`)
+          deps.logger.warn(`could not scan runs of ${task.taskId}: ${String(error)}`)
           continue
         }
         for (const record of records) {
@@ -54,7 +54,7 @@ export function createRunRecovery(deps: RunRecoveryDeps): RunRecovery {
           }
         }
         await deps.records.prune(task).catch((error: unknown) => {
-          deps.logger.warn(`could not prune the history of ${task.id}: ${String(error)}`)
+          deps.logger.warn(`could not prune the history of ${task.taskId}: ${String(error)}`)
         })
       }
     },

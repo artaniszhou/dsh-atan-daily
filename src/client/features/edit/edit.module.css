@@ -1,4 +1,45 @@
-/** 编辑弹窗：调度输入、单选、时区组合框。 */
+/** 编辑抽屉：调度输入、单选、时区组合框、权限级别与会话方式。 */
+.editBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+/* 任务细节是用户内容，放在抽屉最上方，用一条分隔线与下面的运行设置区分。 */
+.detailsField {
+  padding-bottom: 14px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l1);
+}
+/*
+ * 任务名称是单行输入：不能复用表单字段的 220px 弹性基准（竖直方向会撑出大片空白），
+ * 名称与任务详情之间同样用一条分隔线，间距与「任务详情 → 执行时间」一致。
+ */
+.nameField {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding-bottom: 14px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l1);
+}
+.nameHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.nameLabel {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.nameHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
 .editRow {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
@@ -52,6 +93,55 @@
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
   line-height: 18px;
+}
+
+/* 权限级别：标题、两个单选与跟随选择的说明，作为独立段落与下方会话方式分隔。 */
+.permission {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 0.5px solid var(--dsw-alias-border-l1);
+}
+.permissionTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+}
+.permissionHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 每次执行的会话方式：标题与说明在左，开关固定在右侧。 */
+.behavior {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 14px;
+  border-top: 0.5px solid var(--dsw-alias-border-l1);
+}
+.behaviorText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.behaviorTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+}
+.behaviorHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+.behavior > label {
+  margin-top: 2px;
 }
 
 @media (max-width: 520px) {

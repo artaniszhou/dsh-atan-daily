@@ -18,6 +18,8 @@ export interface SettingsController {
   /** 保存/创建目录后的提示（成功或失败）。 */
   note: string
   save: (workDir: string | null) => Promise<boolean>
+  /** 保存任务仓库地址；null 清除覆盖。 */
+  saveServerBaseUrl: (serverBaseUrl: string | null) => Promise<boolean>
   createDir: () => Promise<boolean>
   reload: () => void
 }
@@ -67,6 +69,22 @@ export function useSettings(api: AtanDailyApi, onChanged: () => void): SettingsC
     }
   }, [api, onChanged, saving])
 
+  const saveServerBaseUrl = useCallback(async (serverBaseUrl: string | null): Promise<boolean> => {
+    if (saving) return false
+    setSaving(true)
+    setNote('')
+    try {
+      setSettings(await api.saveServerBaseUrl(serverBaseUrl))
+      setNote(t('saved'))
+      return true
+    } catch (failure: unknown) {
+      setNote(`${t('saveServerUrlFailed')} ${hostErrorText(failure, t)}`)
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }, [api, saving])
+
   const createDir = useCallback(async (): Promise<boolean> => {
     if (saving) return false
     setSaving(true)
@@ -90,6 +108,7 @@ export function useSettings(api: AtanDailyApi, onChanged: () => void): SettingsC
     saving,
     note,
     save,
+    saveServerBaseUrl,
     createDir,
     reload: () => { void load() },
   }

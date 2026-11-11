@@ -11,12 +11,15 @@
  *  - 执行准备阶段有上限，不会让一个卡住的会话调用拖住整个调度循环。
  */
 
+import { mkdir } from 'node:fs/promises'
 import { latestOccurrence, nextOccurrence, parseCron, type CronRule } from '../../core/cron.js'
+import { buildDirOf } from '../../core/documents.js'
 import type { TaskRecord } from '../../protocol.js'
 import { MAX_TIMER_DELAY_MS } from '../config.js'
 import { AppError } from '../errors.js'
 import type { Logger, TimerPort } from '../ports.js'
 import type { RunContext, RunOutcome, RunRecords } from '../runs/records.js'
+import { pruneBuildDirs } from '../runs/build.js'
 import { runFailureOf } from '../runs/failure.js'
 import type { RunExecutor } from '../runs/executor.js'
 import type { RunSessionService } from '../runs/session.js'
@@ -25,10 +28,12 @@ import type { RunSessionService } from '../runs/session.js'
 const RETRY_DELAY_MS = 30_000
 /** 新会话准备（建会话 + 解析 agent）的上限。 */
 const DEFAULT_PREPARE_TIMEOUT_MS = 60_000
-/** 一次执行所需的两个结果。 */
+/** 一次执行所需的准备结果。 */
 export interface PreparedRun {
   sessionId: string
   report: string
+  /** 本轮中间件目录（`.meta/build/<runId>`）。 */
+  buildDir: string
 }
 
 /** 调度器依赖（全部可替换，便于单测）。 */
@@ -39,7 +44,7 @@ export interface SchedulerDeps {
   executor: Pick<RunExecutor, 'drive'>
   /** 把上一轮报告移进 `history/`；在挑选本轮报告名之前调用。 */
   archiveReports: (task: TaskRecord) => Promise<string[]>
-  nextReportName: (task: TaskRecord) => Promise<string>
+  nextReportBase: (task: TaskRecord) => Promise<string>
   timer: TimerPort
   logger: Logger
   clock: () => number
@@ -134,16 +139,16 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
    */
   function track(task: TaskRecord, run: Promise<void>): void {
     const settled = run.catch((error: unknown) => {
-      deps.logger.warn(`run ${task.id} failed: ${String(error)}`)
+      deps.logger.warn(`run ${task.taskId} failed: ${String(error)}`)
     })
     inflight.add(settled)
     void settled.then(() => {
-      running.delete(task.id)
+      running.delete(task.taskId)
       inflight.delete(settled)
     })
   }
 
-  async function prepare(task: TaskRecord): Promise<PreparedRun> {
+  async function prepare(task: TaskRecord, runId: string): Promise<PreparedRun> {
     const withTimeout = async <T>(promise: Promise<T>, label: string): Promise<T> => {
       let timer: ReturnType<typeof setTimeout> | undefined
       const timeout = new Promise<never>((_resolve, reject) => {
@@ -160,11 +165,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     // 先把上一轮完成并留在根目录的报告移进 history/，再挑本轮文件名。
     // 归档失败（占用、权限）只记日志：报告留在原地，运行照常开始。
     await withTimeout(deps.archiveReports(task), 'report archiving').catch((error: unknown) => {
-      deps.logger.warn(`could not archive the previous report of ${task.id}: ${String(error)}`)
+      deps.logger.warn(`could not archive the previous report of ${task.taskId}: ${String(error)}`)
     })
-    const report = await withTimeout(deps.nextReportName(task), 'report naming')
+    const report = await withTimeout(deps.nextReportBase(task), 'report naming')
+    const buildDir = buildDirOf(task.folder, runId)
+    await withTimeout(mkdir(buildDir, { recursive: true }), 'build directory')
     const sessionId = await withTimeout(deps.sessions.prepare(task), 'session preparation')
-    return { sessionId, report }
+    return { sessionId, report, buildDir }
   }
 
   async function finish(
@@ -172,12 +179,24 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     context: RunContext,
     outcome: RunOutcome,
   ): Promise<void> {
+    // 先渲染最终文档，再写运行记录：记录里的 reportExists 要能看到刚生成的
+    // PDF/PNG，否则页面会把「已出报告」误判成「报告缺失」。
+    if (outcome.status === 'ok' && outcome.report !== undefined) {
+      await deps.onRunFinished?.(task, outcome).catch((error: unknown) => {
+        deps.logger.warn(`run ${context.runId} finished but its delivery failed: ${String(error)}`)
+      })
+    }
     await deps.records.finish(task, context, outcome).catch((error: unknown) => {
       deps.logger.warn(`could not finish run ${context.runId}: ${String(error)}`)
     })
-    if (outcome.status !== 'ok' || outcome.report === undefined) return
-    await deps.onRunFinished?.(task, outcome).catch((error: unknown) => {
-      deps.logger.warn(`run ${context.runId} finished but its delivery failed: ${String(error)}`)
+    // 中间件只服务本轮：报告已落到任务根/history，调展示只需要最新一轮的
+    // report.json，其余 build 目录在运行结束后没有读者。
+    await pruneBuildDirs(task.folder, context.runId, deps.logger).then((removed) => {
+      if (removed.length > 0) {
+        deps.logger.info(`pruned ${String(removed.length)} old build director${removed.length === 1 ? 'y' : 'ies'} of ${task.taskId}`)
+      }
+    }).catch((error: unknown) => {
+      deps.logger.warn(`could not prune the build directories of ${task.taskId}: ${String(error)}`)
     })
   }
 
@@ -200,36 +219,39 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         task,
         sessionId: prepared.sessionId,
         report: prepared.report,
+        buildDir: prepared.buildDir,
         timeoutMs: deps.runTimeoutMs(),
       })
       await finish(task, context, {
         status: 'ok',
         sessionId: prepared.sessionId,
         report: prepared.report,
+        buildDir: prepared.buildDir,
       })
     } catch (error: unknown) {
       const failure = runFailureOf(error)
-      deps.logger.warn(`run ${task.id} failed: ${failure.error.message}`)
+      deps.logger.warn(`run ${task.taskId} failed: ${failure.error.message}`)
       await finish(task, context, {
         status: failure.status,
         sessionId: prepared.sessionId,
         report: prepared.report,
+        buildDir: prepared.buildDir,
         error: failure.error,
       })
     }
   }
 
   function startScheduled(task: TaskRecord, scheduledFor: number, catchUp: boolean): void {
-    running.add(task.id)
+    running.add(task.taskId)
     const run = (async () => {
       if (stopped) return
       const context = await deps.records.begin(task, 'schedule', catchUp, scheduledFor)
       let prepared: PreparedRun
       try {
-        prepared = await prepare(task)
+        prepared = await prepare(task, context.runId)
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error)
-        deps.logger.warn(`run ${task.id} could not be prepared: ${message}`)
+        deps.logger.warn(`run ${task.taskId} could not be prepared: ${message}`)
         await finish(task, context, {
           status: 'failed',
           error: { code: 'prepare_failed', message },
@@ -245,7 +267,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     for (const task of tasks) {
       if (stopped) return
       if (!task.enabled || task.cron === undefined) continue
-      const due = next.get(task.id)
+      const due = next.get(task.taskId)
       // `next` is the slot this scheduler was armed for. If a refresh arrives
       // late (slow disk, suspended machine), run that slot once instead of
       // moving `next` forward and losing it.
@@ -254,19 +276,19 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       try {
         rule = parseCron(task.cron)
       } catch (error: unknown) {
-        deps.logger.warn(`task ${task.id} has an invalid cron rule: ${String(error)}`)
+        deps.logger.warn(`task ${task.taskId} has an invalid cron rule: ${String(error)}`)
         continue
       }
       // If the schedule changed since this slot was armed, the old slot is not
       // a current occurrence and must not run.
       if (latestOccurrence(rule, task.timeZone, due) !== due) continue
-      if (running.has(task.id)) {
+      if (running.has(task.taskId)) {
         await deps.records.recordSkip(task, due, 'overlap').catch((error: unknown) => {
-          deps.logger.warn(`could not record an overlap skip of ${task.id}: ${String(error)}`)
+          deps.logger.warn(`could not record an overlap skip of ${task.taskId}: ${String(error)}`)
         })
         continue
       }
-      deps.logger.info(`due ${task.id} (armed for ${new Date(due).toISOString()})`)
+      deps.logger.info(`due ${task.taskId} (armed for ${new Date(due).toISOString()})`)
       startScheduled(task, due, false)
     }
   }
@@ -288,8 +310,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         Date.parse(task.createdAt),
       )
       if (!Number.isFinite(baseline) || latest <= baseline) continue
-      if (running.has(task.id)) continue
-      deps.logger.info(`catching up ${task.id} for ${new Date(latest).toISOString()}`)
+      if (running.has(task.taskId)) continue
+      deps.logger.info(`catching up ${task.taskId} for ${new Date(latest).toISOString()}`)
       startScheduled(task, latest, true)
     }
   }
@@ -302,11 +324,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       try {
         rule = parseCron(task.cron)
       } catch (error: unknown) {
-        deps.logger.warn(`task ${task.id} has an invalid cron rule: ${String(error)}`)
+        deps.logger.warn(`task ${task.taskId} has an invalid cron rule: ${String(error)}`)
         continue
       }
       const due = nextOccurrence(rule, task.timeZone, at)
-      if (due !== undefined) computed.set(task.id, due)
+      if (due !== undefined) computed.set(task.taskId, due)
     }
     next = computed
     let earliest: number | undefined
@@ -373,22 +395,22 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     refresh,
 
     async startManual(task: TaskRecord): Promise<{ sessionId: string }> {
-      if (running.has(task.id)) throw new AppError('already_running', 409, 'already running')
-      running.add(task.id)
+      if (running.has(task.taskId)) throw new AppError('already_running', 409, 'already running')
+      running.add(task.taskId)
       let context: RunContext
       try {
         context = await deps.records.begin(task, 'manual', false)
       } catch (error: unknown) {
-        running.delete(task.id)
+        running.delete(task.taskId)
         throw new AppError('run_failed', 500, error instanceof Error ? error.message : String(error))
       }
       let prepared: PreparedRun
       try {
-        prepared = await prepare(task)
+        prepared = await prepare(task, context.runId)
       } catch (error: unknown) {
-        running.delete(task.id)
+        running.delete(task.taskId)
         const message = error instanceof Error ? error.message : String(error)
-        deps.logger.warn(`run ${task.id} could not start: ${message}`)
+        deps.logger.warn(`run ${task.taskId} could not start: ${message}`)
         await finish(task, context, {
           status: 'failed',
           error: { code: 'prepare_failed', message },
@@ -409,3 +431,4 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     },
   }
 }
+

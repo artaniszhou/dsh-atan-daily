@@ -5,7 +5,7 @@
  * 90 个 `StyleMap` 里 69 个只被引用一次。这里让所有页面从同一组原子取外观，
  * 几何与颜色由 `kit.module.css` + `--dsw-*` 令牌决定。
  */
-import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react'
+import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import type { Tone } from '../shared/status.ts'
 import { toneColor } from './tokens.ts'
 import css from './kit.module.css'
@@ -92,6 +92,14 @@ export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
   ref,
 ) {
   return <input ref={ref} className={cx(css.input, className)} {...rest} />
+})
+
+/** 固定选项下拉。 */
+export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(function Select(
+  { className, ...rest },
+  ref,
+) {
+  return <select ref={ref} className={cx(css.select, className)} {...rest} />
 })
 
 /** 多行文本输入。 */

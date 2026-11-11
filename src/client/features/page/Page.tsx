@@ -7,17 +7,21 @@
 import { useState } from 'react'
 import type { TaskRecord } from '../../../protocol.ts'
 import type { AtanDailyApi } from '../../api/tasks.ts'
+import { CONTACT_DOC_URL } from '../../constants.ts'
 import { t } from '../../i18n/index.ts'
-import { IconRobot } from '../../ui/icons.tsx'
+import { IconInbox, IconMessage, IconRobot } from '../../ui/icons.tsx'
 import { Button } from '../../ui/primitives.tsx'
 import { RobotDrawer } from '../bots/RobotDrawer.tsx'
 import { useBots } from '../bots/useBots.ts'
+import { AnnouncementBanner } from '../announcement/AnnouncementBanner.tsx'
 import { CreateTaskForm } from '../create/CreateTaskForm.tsx'
-import { EditDialog } from '../edit/EditDialog.tsx'
+import { EditDrawer } from '../edit/EditDrawer.tsx'
 import { HistoryDrawer } from '../history/HistoryDrawer.tsx'
 import { TaskList } from '../list/TaskList.tsx'
 import { useTaskList } from '../list/useTaskList.ts'
 import { PushDrawer } from '../push/PushDrawer.tsx'
+import { TaskWarehouseDrawer } from '../task-hub/TaskWarehouseDrawer.tsx'
+import { UploadTaskDialog } from '../task-hub/UploadTaskDialog.tsx'
 import { SettingsLine } from '../settings/SettingsLine.tsx'
 import { useSettings } from '../settings/useSettings.ts'
 import css from './page.module.css'
@@ -29,10 +33,12 @@ export interface PageProps {
   navigate: (sessionId: string) => void
   /** 删除前的二次确认（由宿主/测试注入）。 */
   confirm: (message: string) => boolean
+  /** 打开宿主操作系统的目录选择器；取消时返回 null。 */
+  pickDirectory: () => Promise<string | null>
 }
 
 /** 中央页面。 */
-export function Page({ api, navigate, confirm }: PageProps) {
+export function Page({ api, navigate, confirm, pickDirectory }: PageProps) {
   const [listEpoch, setListEpoch] = useState<number>(0)
   const list = useTaskList(api, { onSession: navigate, confirm })
   // 目录切换后列表内容整体换了：清掉旧的搜索/页码，避免新任务被旧查询藏住。
@@ -44,10 +50,13 @@ export function Page({ api, navigate, confirm }: PageProps) {
   const [historyOf, setHistoryOf] = useState<TaskRecord | null>(null)
   const [editOf, setEditOf] = useState<TaskRecord | null>(null)
   const [botsOpen, setBotsOpen] = useState<boolean>(false)
+  const [contactNotice, setContactNotice] = useState<string>('')
+  const [warehouseOpen, setWarehouseOpen] = useState<boolean>(false)
+  const [uploadDraft, setUploadDraft] = useState<{ task: TaskRecord, details: string } | null>(null)
   /** 正在配置推送的任务 id；任务被删掉时抽屉自动消失。 */
   const [pushOfId, setPushOfId] = useState<string | null>(null)
   const bots = useBots(api)
-  const pushTask = pushOfId === null ? undefined : list.tasks.find(item => item.id === pushOfId)
+  const pushTask = pushOfId === null ? undefined : list.tasks.find(item => item.taskId === pushOfId)
 
   const created = (task: TaskRecord): void => {
     list.prepend(task)
@@ -61,6 +70,20 @@ export function Page({ api, navigate, confirm }: PageProps) {
     setEditOf(null)
   }
 
+  /** 打开仓库里的「联系作者」文档；新标签页同步开窗，避免被当作非用户手势拦截。 */
+  const openContact = (): void => {
+    setContactNotice('')
+    const opened = window.open(CONTACT_DOC_URL, '_blank')
+    if (opened === null) {
+      setContactNotice('浏览器拦截了新标签页，请允许弹窗后重试。')
+      return
+    }
+    opened.opener = null
+  }
+
+  /** 设置还没加载完时按可用处理，避免首帧闪一下禁用态。 */
+  const workDirReady = settings.settings === null || settings.settings.workDirConfigured
+
   return (
     <section className={css.root} aria-label={t('title')} data-testid="atan-daily-page">
       <div className={css.scroll}>
@@ -68,6 +91,23 @@ export function Page({ api, navigate, confirm }: PageProps) {
           <div className={css.heading}>
             <h1 className={css.title}>{t('title')}</h1>
             <div className={css.headingActions}>
+              <Button
+                variant="quiet"
+                icon={<IconMessage size={15} />}
+                onClick={openContact}
+              >
+                联系作者
+              </Button>
+              <Button
+                variant="quiet"
+                icon={<IconInbox size={15} />}
+                aria-expanded={warehouseOpen}
+                disabled={!workDirReady}
+                title={workDirReady ? undefined : t('workDirRequiredHint')}
+                onClick={() => { setWarehouseOpen(true) }}
+              >
+                任务仓库
+              </Button>
               <Button
                 variant="quiet"
                 icon={<IconRobot size={15} />}
@@ -78,15 +118,21 @@ export function Page({ api, navigate, confirm }: PageProps) {
               </Button>
               <Button
                 variant="primary"
-                disabled={createOpen}
+                disabled={createOpen || !workDirReady}
                 aria-expanded={createOpen}
+                title={workDirReady ? undefined : t('workDirRequiredHint')}
                 onClick={() => { setCreateOpen(true) }}
               >
                 {t('add')}
               </Button>
             </div>
           </div>
-          <p className={css.subtitle}>{t('subtitle')}</p>
+          {/* 标题下方是公告位：没有公告时整块不渲染，页面结构与没有这个功能时一致。 */}
+          <AnnouncementBanner api={api} serverBaseUrl={settings.settings?.serverBaseUrl ?? ''} />
+
+          {contactNotice === ''
+            ? null
+            : <div className={css.settingsWarning} role="status">{contactNotice}</div>}
 
           {settings.error === ''
             ? null
@@ -100,7 +146,9 @@ export function Page({ api, navigate, confirm }: PageProps) {
                 saving={settings.saving}
                 note={settings.note}
                 onSave={settings.save}
+                onSaveServerUrl={settings.saveServerBaseUrl}
                 onCreateDir={settings.createDir}
+                onPick={pickDirectory}
               />
               )}
 
@@ -123,7 +171,7 @@ export function Page({ api, navigate, confirm }: PageProps) {
             onEdit={setEditOf}
             onRemove={list.remove}
             bots={bots.bots}
-            onManagePush={(task) => { setPushOfId(task.id) }}
+            onManagePush={(task) => { setPushOfId(task.taskId) }}
           />
         </div>
       </div>
@@ -141,6 +189,20 @@ export function Page({ api, navigate, confirm }: PageProps) {
 
       {botsOpen
         ? <RobotDrawer bots={bots} onClose={() => { setBotsOpen(false); bots.reload() }} />
+        : null}
+
+      {warehouseOpen
+        ? (
+          <TaskWarehouseDrawer
+            api={api}
+            onClose={() => { setWarehouseOpen(false) }}
+            onLoaded={(task) => {
+              list.prepend(task)
+              setWarehouseOpen(false)
+              list.reload()
+            }}
+          />
+          )
         : null}
 
       {pushTask === undefined
@@ -164,12 +226,26 @@ export function Page({ api, navigate, confirm }: PageProps) {
       {editOf === null
         ? null
         : (
-          <EditDialog
-            key={editOf.id}
+          <EditDrawer
+            key={editOf.taskId}
             api={api}
             task={editOf}
+            browserAvailable={settings.settings?.browserAvailable ?? false}
             onClose={() => { setEditOf(null) }}
             onSaved={saved}
+            onUpload={(task, details) => { setUploadDraft({ task, details }) }}
+          />
+          )}
+
+      {uploadDraft === null
+        ? null
+        : (
+          <UploadTaskDialog
+            api={api}
+            task={uploadDraft.task}
+            details={uploadDraft.details}
+            onClose={() => { setUploadDraft(null) }}
+            onSubmitted={() => { setUploadDraft(null) }}
           />
           )}
     </section>

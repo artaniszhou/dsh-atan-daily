@@ -3,9 +3,8 @@
 # so lib/ stays out of version control.
 lib/
 
-# Internal design notes and reviews stay local; only README.md and the product
-# document are published.
-docs/
+# Per-request solution documents live here; local only (plugin dev rule).
+.request/
 
 node_modules/
 npm-debug.log*
@@ -25,10 +24,22 @@ output/
 # Logs and tool caches.
 *.log
 .cache/
-.playwright-mcp/
 
 # Editor and OS clutter.
 .idea/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# e2e 证据（截图、控制台日志、结果 JSON）只留本地。
+e2e/.evidence/
+e2e/.profile/
+e2e/.url
+e2e/.creds.json
+e2e/.restore.json
+
+# e2e 全部产物（用例、截图、控制台日志、报告）只留本地，不进 git。
+.e2e/
+
+# Playwright MCP 的会话快照与截图（本地产物）。
+.playwright-mcp/

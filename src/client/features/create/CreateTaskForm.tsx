@@ -1,7 +1,8 @@
 /**
  * 新建任务表单。
  *
- * Host 负责根据名称、详情与时间说法生成任务目录与规则文档；这里只收集输入。
+ * Host 负责根据名称、详情与时间说法生成任务目录、`task-detail.md` 与
+ * `meta/index.md`；这里只收集输入。
  * 时区复用编辑弹窗的同一个选择器，避免“新建填自由文本、编辑用组合框”的割裂。
  */
 import { useEffect, useId, useRef, useState } from 'react'
@@ -44,6 +45,22 @@ export function CreateTaskForm({ api, onCreated, onClose }: CreateTaskFormProps)
     return () => { window.clearTimeout(handle) }
   }, [])
 
+  /**
+   * Esc 关闭表单。
+   *
+   * 不能挂在 `<form onKeyDown>` 上：提交失败后提交键重新渲染，焦点会落到
+   * `document.body`，事件不再经过表单，Esc 就失灵了。挂到文档层后与焦点位置无关；
+   * 时区下拉自己消费过的 Esc（`defaultPrevented`）不重复处理。
+   */
+  useEffect(() => {
+    const handle = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (!saving) onClose()
+    }
+    document.addEventListener('keydown', handle)
+    return () => { document.removeEventListener('keydown', handle) }
+  }, [onClose, saving])
+
   const submit = (): void => {
     if (saving) return
     const trimmed = name.trim()
@@ -77,11 +94,6 @@ export function CreateTaskForm({ api, onCreated, onClose }: CreateTaskFormProps)
       className={css.form}
       aria-label={t('createTitle')}
       onSubmit={(event) => { event.preventDefault(); submit() }}
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape') return
-        event.stopPropagation()
-        if (!saving) onClose()
-      }}
     >
       <Field label={t('nameLabel')} htmlFor={nameId}>
         <TextInput

@@ -1,19 +1,24 @@
-# Inserts the Host half of Atan Daily (阿碳日报) into the profile whenever this
+# Inserts the Host half of 阿碳日报 (Atan Daily) into the profile whenever this
 # bundle is enabled.
 #
 # Fields (all optional):
-#   dataDir            the plugin's initial working directory, where task
-#                      folders live. It is also the working directory (cwd) a
-#                      run's Session gets — the two are one concept here.
-#                      default: $DSH_HOME/plugin-data/atan-daily
-#                      NOTE: the page's 「工作目录」 area saves its own choice in
-#                      $DSH_HOME/plugin-data/atan-daily/settings.json and takes
-#                      precedence over this.
+#   dataDir            suggested working directory, where task folders live. It is
+#                      only used for the page's 「使用建议目录」 button and for the
+#                      one-time migration of old installs; it is NOT an automatic
+#                      default. Nothing is created or registered until the user
+#                      picks a directory on the page (or accepts this suggestion),
+#                      and the choice is persisted in settings.json.
 #   runTimeoutSeconds  bound on one unattended run (default 1800)
 #   historyDays        default days of run history for new tasks
 #                      (default 7; 0 = keep all). Each task can override it.
+#   serverBaseUrl      task manager service origin, e.g. http://10.0.0.12:8080.
+#                      Used by 上传任务 / 任务仓库 / 任务详情. The page's
+#                      「任务仓库地址」 row overrides it at runtime and stores the
+#                      override in settings.json.
+#                      default: https://atandaily.cn (explicit '' disables the
+#                      upload / task hub features).
 #
-# Override this row by id in a profile's own cordis.patch.yml — a matching
+# Override this row by id in a profile's own cordis.patch.yml: a matching
 # override replaces the whole `config`, so restate the fields you still want:
 #
 #   - id: atan-daily

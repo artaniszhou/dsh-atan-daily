@@ -6,10 +6,11 @@
 
 import { rm } from 'node:fs/promises'
 import { listRunRecords } from '../../core/runs.js'
-import type { TaskListStore } from '../../core/task-list.js'
+import type { TaskMetaPatch } from '../../core/task-list.js'
 import type { TaskRecord } from '../../protocol.js'
 import { ROUTE } from '../config.js'
 import { AppError } from '../errors.js'
+import type { Workspace } from '../settings/hub.js'
 import { answer, methodNotAllowed, pathnameOf, readJsonBody } from './server.js'
 import type { RouteHandler } from '../ports.js'
 import type { TaskRepository } from '../repository.js'
@@ -22,19 +23,26 @@ import { parseCreateBody, parsePatchBody, parseRunsQuery } from './validate.js'
 /** 任务路由依赖。 */
 export interface TaskRoutesDeps {
   repository: TaskRepository
-  store: () => TaskListStore
+  /** 当前工作区；未配置时抛 `no_workspace`。 */
+  workspace: () => Workspace
   createTask: (input: CreateTaskInput) => Promise<TaskRecord>
+  /** 应用元数据补丁；`name` 变化时连带把任务目录改成新名字。 */
+  renameTask: (task: TaskRecord, patch: TaskMetaPatch) => Promise<TaskRecord>
   scheduler: Pick<Scheduler, 'refresh' | 'startManual' | 'isRunning' | 'nextRunAt'>
   sessions: Pick<RunSessionService, 'open'>
   records: Pick<RunRecords, 'prune'>
+  /** 把编辑抽屉里的任务细节写回 `task-detail.md`。 */
+  writeDetails: (folder: string, details: string) => Promise<void>
   hostTimeZone: () => string
+  /** 当前宿主是否找到 Chrome/Edge；没有时不允许选 PNG。 */
+  browserAvailable: () => boolean
 }
 
 /** 单项任务路由处理器。 */
 export type TaskItemHandler = (
   request: Parameters<RouteHandler>[0],
   response: Parameters<RouteHandler>[1],
-  id: string,
+  taskId: string,
   action: string,
 ) => Promise<void>
 
@@ -51,28 +59,28 @@ export interface TaskRoutes {
  * @returns 带 nextRunAt/running 的视图。
  */
 function withRuntime(deps: TaskRoutesDeps, task: TaskRecord): TaskRecord {
-  const due = deps.scheduler.nextRunAt(task.id)
+  const due = deps.scheduler.nextRunAt(task.taskId)
   return {
     ...task,
     ...due === undefined ? {} : { nextRunAt: new Date(due).toISOString() },
-    ...deps.scheduler.isRunning(task.id) ? { running: true } : {},
+    ...deps.scheduler.isRunning(task.taskId) ? { running: true } : {},
   }
 }
 
 /**
- * 解析 `/atan-daily/tasks/<id>/<action>`。
+ * 解析 `/atan-daily/tasks/<taskId>/<action>`。
  * @param pathname - URL pathname。
- * @returns id 与 action，或 undefined 当路径不属于任务前缀。
+ * @returns taskId 与 action，或 undefined 当路径不属于任务前缀。
  */
-export function parseTaskPath(pathname: string): { id: string, action: string } | undefined {
-  if (pathname === ROUTE) return { id: '', action: '' }
+export function parseTaskPath(pathname: string): { taskId: string, action: string } | undefined {
+  if (pathname === ROUTE) return { taskId: '', action: '' }
   const prefix = `${ROUTE}/`
   if (!pathname.startsWith(prefix)) return undefined
   const segments = pathname.slice(prefix.length).split('/')
   if (segments.length > 2) throw new AppError('invalid_input', 400, 'a valid task id is required')
   try {
     return {
-      id: decodeURIComponent(segments[0] ?? ''),
+      taskId: decodeURIComponent(segments[0] ?? ''),
       action: decodeURIComponent(segments[1] ?? ''),
     }
   } catch {
@@ -96,7 +104,10 @@ export function createTaskRoutes(deps: TaskRoutesDeps): TaskRoutes {
     if (method === 'POST') {
       const payload = await readJsonBody(request)
       const input = parseCreateBody(payload, deps.hostTimeZone())
-      const task = await deps.createTask(input)
+      const task = await deps.createTask({
+        ...input,
+        outputFormat: deps.browserAvailable() ? 'png' : 'pdf',
+      })
       await deps.scheduler.refresh()
       answer(response, 201, { ok: true, task: withRuntime(deps, task) })
       return
@@ -104,12 +115,12 @@ export function createTaskRoutes(deps: TaskRoutesDeps): TaskRoutes {
     methodNotAllowed(response, method)
   }
 
-  const item: TaskItemHandler = async (request, response, id, action) => {
+  const item: TaskItemHandler = async (request, response, taskId, action) => {
     const method = request.method ?? 'GET'
-    if (id === '' || /[\\/]/u.test(id) || /[\\/]/u.test(action)) {
+    if (taskId === '' || /[\\/]/u.test(taskId) || /[\\/]/u.test(action)) {
       throw new AppError('invalid_input', 400, 'a valid task id is required')
     }
-    const task = await deps.repository.read(id)
+    const task = await deps.repository.read(taskId)
     if (task === undefined) throw new AppError('not_found', 404, 'task not found')
 
     if (action === 'runs') {
@@ -146,22 +157,27 @@ export function createTaskRoutes(deps: TaskRoutesDeps): TaskRoutes {
     if (action !== '') throw new AppError('not_found', 404, 'not found')
 
     if (method === 'DELETE') {
-      if (deps.scheduler.isRunning(id)) {
+      if (deps.scheduler.isRunning(task.taskId)) {
         throw new AppError('already_running', 409, 'a run is in progress for this task')
       }
       await rm(task.folder, { recursive: true, force: true })
-      await deps.store().remove(id)
+      await deps.workspace().store.remove(task.taskId)
       await deps.scheduler.refresh()
-      answer(response, 200, { ok: true, id })
+      answer(response, 200, { ok: true, taskId: task.taskId })
       return
     }
 
     if (method === 'PATCH') {
       const payload = await readJsonBody(request)
-      const { patch, historyDaysChanged } = parsePatchBody(payload, task)
-      await deps.store().patch(id, patch)
+      const { patch, details, historyDaysChanged } = parsePatchBody(payload, task)
+      if (patch.outputFormat === 'png' && !deps.browserAvailable()) {
+        throw new AppError('invalid_input', 400, '当前宿主没有找到 Chrome/Edge，不能选择 PNG；请改用 PDF')
+      }
+      // 名称变化会连带改目录：目录改名与其余补丁在同一次注册表写入里落盘。
+      const renamed = Object.keys(patch).length > 0 ? await deps.renameTask(task, patch) : task
+      if (details !== undefined) await deps.writeDetails(renamed.folder, details)
       await deps.scheduler.refresh()
-      const updated = await deps.repository.read(id)
+      const updated = await deps.repository.read(task.taskId)
       if (updated === undefined) throw new AppError('not_found', 404, 'task not found')
       if (historyDaysChanged) await deps.records.prune(updated, true)
       answer(response, 200, { ok: true, task: withRuntime(deps, updated) })

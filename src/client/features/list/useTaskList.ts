@@ -113,43 +113,43 @@ export function useTaskList(api: AtanDailyApi, options: TaskListOptions): TaskLi
   usePolling(tasks.some(task => task.running === true), poll, { intervalMs: POLL_INTERVAL_MS })
 
   const mark = useCallback((id: string, patch: Partial<TaskRecord>): void => {
-    setTasks(previous => previous.map(task => (task.id === id ? { ...task, ...patch } : task)))
+    setTasks(previous => previous.map(task => (task.taskId === id ? { ...task, ...patch } : task)))
   }, [])
 
   const run = useCallback((task: TaskRecord): void => {
     // 先乐观置为执行中，Host 返回后再以服务端数据为准。
-    mark(task.id, { running: true, lastError: undefined })
-    void api.runTask(task.id).then(async (sessionId) => {
+    mark(task.taskId, { running: true, lastError: undefined })
+    void api.runTask(task.taskId).then(async (sessionId) => {
       if (sessionId !== undefined) onSession(sessionId)
       try {
         setTasks(await api.listTasks())
       } catch (failure: unknown) {
         // 关键：刷新失败必须落回错误态，否则这一行会永远停在“执行中”。
-        mark(task.id, { running: false, lastError: hostErrorText(failure, t) })
+        mark(task.taskId, { running: false, lastError: hostErrorText(failure, t) })
       }
     }).catch((failure: unknown) => {
-      mark(task.id, { running: false, lastError: hostErrorText(failure, t) })
+      mark(task.taskId, { running: false, lastError: hostErrorText(failure, t) })
     })
   }, [api, mark, onSession])
 
   const toggle = useCallback((task: TaskRecord): void => {
     const enabled = !task.enabled
-    mark(task.id, { enabled })
-    void api.patchTask(task.id, { enabled }).then((updated) => {
-      setTasks(previous => previous.map(item => (item.id === updated.id ? updated : item)))
+    mark(task.taskId, { enabled })
+    void api.patchTask(task.taskId, { enabled }).then((updated) => {
+      setTasks(previous => previous.map(item => (item.taskId === updated.taskId ? updated : item)))
     }).catch((failure: unknown) => {
-      mark(task.id, { enabled: task.enabled, lastError: hostErrorText(failure, t) })
+      mark(task.taskId, { enabled: task.enabled, lastError: hostErrorText(failure, t) })
     })
   }, [api, mark])
 
   /** 推送目标与开关一起落盘：先乐观更新，失败回滚并写回行内错误。 */
   const applyPush = useCallback((task: TaskRecord, botIds: string[], enabled: boolean): void => {
     const previous = { pushBotIds: task.pushBotIds, pushEnabled: task.pushEnabled }
-    mark(task.id, { pushBotIds: botIds, pushEnabled: enabled })
-    void api.patchTask(task.id, { pushBotIds: botIds, pushEnabled: enabled }).then((updated) => {
-      setTasks(previousTasks => previousTasks.map(item => (item.id === updated.id ? updated : item)))
+    mark(task.taskId, { pushBotIds: botIds, pushEnabled: enabled })
+    void api.patchTask(task.taskId, { pushBotIds: botIds, pushEnabled: enabled }).then((updated) => {
+      setTasks(previousTasks => previousTasks.map(item => (item.taskId === updated.taskId ? updated : item)))
     }).catch((failure: unknown) => {
-      mark(task.id, { ...previous, lastError: hostErrorText(failure, t) })
+      mark(task.taskId, { ...previous, lastError: hostErrorText(failure, t) })
     })
   }, [api, mark])
 
@@ -168,18 +168,18 @@ export function useTaskList(api: AtanDailyApi, options: TaskListOptions): TaskLi
 
   const remove = useCallback((task: TaskRecord): void => {
     if (!confirm(`${t('removeConfirm')}\n\n${task.name}`)) return
-    void api.deleteTask(task.id).then(() => {
-      setTasks(previous => previous.filter(item => item.id !== task.id))
+    void api.deleteTask(task.taskId).then(() => {
+      setTasks(previous => previous.filter(item => item.taskId !== task.taskId))
     }).catch((failure: unknown) => {
-      mark(task.id, { lastError: hostErrorText(failure, t) })
+      mark(task.taskId, { lastError: hostErrorText(failure, t) })
     })
   }, [api, confirm, mark])
 
   const openSession = useCallback((task: TaskRecord): void => {
-    void api.openSession(task.id).then((sessionId) => {
+    void api.openSession(task.taskId).then((sessionId) => {
       if (sessionId !== undefined) onSession(sessionId)
     }).catch((failure: unknown) => {
-      mark(task.id, { lastError: `${t('openFailed')} ${hostErrorText(failure, t)}` })
+      mark(task.taskId, { lastError: `${t('openFailed')} ${hostErrorText(failure, t)}` })
     })
   }, [api, mark, onSession])
 
@@ -198,6 +198,6 @@ export function useTaskList(api: AtanDailyApi, options: TaskListOptions): TaskLi
     remove,
     openSession,
     prepend: task => { setTasks(previous => [task, ...previous]) },
-    replace: task => { setTasks(previous => previous.map(item => (item.id === task.id ? task : item))) },
+    replace: task => { setTasks(previous => previous.map(item => (item.taskId === task.taskId ? task : item))) },
   }
 }

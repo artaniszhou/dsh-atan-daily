@@ -7,8 +7,9 @@
 import { isKnownTimeZone, parseCron } from '../../core/cron.js'
 import { parseScheduleText, type ParsedSchedule } from '../../core/schedule-text.js'
 import type { ScheduleMode, TaskMetaPatch } from '../../core/task-list.js'
-import { HISTORY_DAYS_MAX, RUN_PAGE_SIZE, type RunStatus, type TaskRecord } from '../../protocol.js'
-import { isRunStatus, MAX_DETAIL_LENGTH, MAX_NAME_LENGTH } from '../config.js'
+import { HISTORY_DAYS_MAX, RUN_PAGE_SIZE, isOutputFormat, type RunStatus, type TaskRecord } from '../../protocol.js'
+import { isRunStatus, MAX_DETAIL_LENGTH } from '../config.js'
+import { validateTaskName } from '../naming.js'
 import { AppError } from '../errors.js'
 
 /** 一个任务最多绑几个推送机器人。 */
@@ -25,6 +26,8 @@ export interface CreateInput {
 /** PATCH 任务的已校验输入。 */
 export interface PatchInput {
   patch: TaskMetaPatch
+  /** 只改元数据时缺省；出现时写回 `task-detail.md`。 */
+  details?: string
   historyDaysChanged: boolean
 }
 
@@ -55,9 +58,11 @@ function asRecord(value: unknown, what: string): Record<string, unknown> {
  */
 function readName(value: unknown): string {
   if (typeof value !== 'string') throw new AppError('invalid_input', 400, 'name is required')
-  const name = value.trim().slice(0, MAX_NAME_LENGTH)
-  if (name === '') throw new AppError('invalid_input', 400, 'name is required')
-  return name
+  try {
+    return validateTaskName(value)
+  } catch (error: unknown) {
+    throw new AppError('invalid_input', 400, error instanceof Error ? error.message : String(error))
+  }
 }
 
 /**
@@ -121,15 +126,28 @@ export function parseCreateBody(payload: unknown, hostZone: string): CreateInput
  * 校验 PATCH 任务请求。
  *
  * 只有任务从“仅手动”变成有执行时间时才默认启用；已经停用的任务在编辑
- * 时间/时区/保留天数时保持停用。
+ * 时间/时区/保留天数时保持停用。`details` 不走元数据补丁，而是写回任务
+ * 目录的 `task-detail.md`。
  * @param payload - 请求体。
  * @param current - 当前任务。
- * @returns 元数据补丁。
+ * @returns 元数据补丁与可选的详情。
  */
 export function parsePatchBody(payload: unknown, current: TaskRecord): PatchInput {
   const record = asRecord(payload, 'request body')
   const patch: TaskMetaPatch = {}
+  let details: string | undefined
   let historyDaysChanged = false
+
+  if (record['details'] !== undefined) {
+    if (typeof record['details'] !== 'string') {
+      throw new AppError('invalid_input', 400, 'details must be a string')
+    }
+    details = record['details'].slice(0, MAX_DETAIL_LENGTH)
+  }
+
+  if (record['name'] !== undefined) {
+    patch.name = readName(record['name'])
+  }
 
   if (record['enabled'] !== undefined) {
     if (typeof record['enabled'] !== 'boolean') {
@@ -184,6 +202,29 @@ export function parsePatchBody(payload: unknown, current: TaskRecord): PatchInpu
       throw new AppError('invalid_input', 400, 'pushEnabled 必须是布尔值')
     }
     patch.pushEnabled = record['pushEnabled']
+  }
+
+  if (record['newSession'] !== undefined) {
+    if (typeof record['newSession'] !== 'boolean') {
+      throw new AppError('invalid_input', 400, 'newSession 必须是布尔值')
+    }
+    patch.newSession = record['newSession']
+  }
+
+  if (record['permissionLevel'] !== undefined) {
+    const value = record['permissionLevel']
+    if (value === 'workspace-write' || value === 'danger-full-access') {
+      patch.permissionLevel = value
+    } else {
+      throw new AppError('invalid_input', 400, 'permissionLevel 必须是 workspace-write 或 danger-full-access')
+    }
+  }
+
+  if (record['outputFormat'] !== undefined) {
+    if (!isOutputFormat(record['outputFormat'])) {
+      throw new AppError('invalid_input', 400, 'outputFormat 必须是 pdf 或 png')
+    }
+    patch.outputFormat = record['outputFormat']
   }
 
   let scheduleInput: { mode?: unknown, text?: unknown, cron?: unknown } | undefined
@@ -250,10 +291,10 @@ export function parsePatchBody(payload: unknown, current: TaskRecord): PatchInpu
     }
   }
 
-  if (Object.keys(patch).length === 0) {
+  if (Object.keys(patch).length === 0 && details === undefined) {
     throw new AppError('invalid_input', 400, 'nothing to update')
   }
-  return { patch, historyDaysChanged }
+  return { patch, ...details === undefined ? {} : { details }, historyDaysChanged }
 }
 
 /**

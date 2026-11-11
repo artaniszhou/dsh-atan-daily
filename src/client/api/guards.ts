@@ -8,10 +8,12 @@
  * 取舍：手写校验而不是引入 zod，是为了让 client bundle 不增加运行时依赖。
  */
 import type {
+  AnnouncementView,
   BotsStatus,
   BotView,
   Frequency,
   ImChannel,
+  OutputFormat,
   ProvisionState,
   ProvisionView,
   RunRecord,
@@ -20,9 +22,11 @@ import type {
   SettingsView,
   TaskRecord,
 } from '../../protocol.ts'
+import { OUTPUT_FORMATS, PERMISSION_LEVELS } from '../../protocol.ts'
 import { HostError } from './errors.ts'
 
 const FREQUENCIES: readonly Frequency[] = ['daily', 'hourly', 'on-demand']
+const OUTPUT: readonly OutputFormat[] = OUTPUT_FORMATS
 const RUN_STATUSES: readonly RunStatus[] = ['running', 'ok', 'failed', 'timeout', 'cancelled', 'interrupted', 'skipped']
 const SCHEDULE_MODES: readonly ScheduleMode[] = ['text', 'cron', 'manual']
 const IM_CHANNELS: readonly ImChannel[] = ['feishu']
@@ -141,7 +145,7 @@ function decodeRunError(value: unknown): { code: string, message: string } | nul
 export function decodeTask(value: unknown): TaskRecord {
   const record = asRecord(value, 'task')
   const task: TaskRecord = {
-    id: reqString(record, 'id'),
+    taskId: reqString(record, 'taskId'),
     name: reqString(record, 'name'),
     details: reqString(record, 'details'),
     frequency: oneOf(record, 'frequency', FREQUENCIES),
@@ -154,6 +158,9 @@ export function decodeTask(value: unknown): TaskRecord {
     historyDays: reqNumber(record, 'historyDays'),
     pushBotIds: reqStringArray(record, 'pushBotIds'),
     pushEnabled: optBool(record, 'pushEnabled') ?? false,
+    newSession: reqBool(record, 'newSession'),
+    permissionLevel: oneOf(record, 'permissionLevel', PERMISSION_LEVELS),
+    outputFormat: oneOf(record, 'outputFormat', OUTPUT),
   }
   const sessionId = optString(record, 'sessionId')
   if (sessionId !== undefined) task.sessionId = sessionId
@@ -226,12 +233,19 @@ export function decodeSettings(payload: unknown): SettingsView {
   const pluginVersion = optString(record, 'pluginVersion')
   const workspaceError = optString(record, 'workspaceError')
   return {
-    workDir: reqString(record, 'workDir'),
-    defaultWorkDir: reqString(record, 'defaultWorkDir'),
-    savedWorkDir: reqString(record, 'savedWorkDir'),
+    workDir: optString(record, 'workDir') ?? '',
+    workDirConfigured: optBool(record, 'workDirConfigured') ?? true,
+    suggestedWorkDir: optString(record, 'suggestedWorkDir') ?? '',
+    savedWorkDir: optString(record, 'savedWorkDir') ?? '',
+    // Host 与 Client 版本可能短暂错位（Client 刷新即生效、Host 要重启），
+    // 缺这三个字段时按「未配置」处理，不整页报错。
+    serverBaseUrl: optString(record, 'serverBaseUrl') ?? '',
+    savedServerBaseUrl: optString(record, 'savedServerBaseUrl') ?? '',
+    defaultServerBaseUrl: optString(record, 'defaultServerBaseUrl') ?? '',
     tasksTotal: reqNumber(record, 'tasksTotal'),
     tasksEnabled: reqNumber(record, 'tasksEnabled'),
     dirExists: reqBool(record, 'dirExists'),
+    browserAvailable: reqBool(record, 'browserAvailable'),
     workspace,
     ...(pluginVersion === undefined ? {} : { pluginVersion }),
     ...(workspaceError === undefined ? {} : { workspaceError }),
@@ -329,4 +343,22 @@ export function decodeBotsStatus(payload: unknown): BotsStatus {
 export function decodeProvisionResponse(payload: unknown): ProvisionView {
   const record = asRecord(payload, 'response')
   return decodeProvision(record.provisioning)
+}
+
+/**
+ * 解码公告视图。
+ *
+ * `enabled=false` 时 Host 仍然返回三个空字段，页面据此整块不渲染；
+ * 这里不做「必须非空」的强校验，否则无公告会变成一条错误。
+ * @param payload - `GET atan-daily/announcement` 的响应体。
+ * @returns 扁平公告视图。
+ */
+export function decodeAnnouncement(payload: unknown): AnnouncementView {
+  const record = asRecord(payload, 'announcement')
+  return {
+    enabled: reqBool(record, 'enabled'),
+    title: optString(record, 'title') ?? '',
+    content: optString(record, 'content') ?? '',
+    updatedAt: optString(record, 'updatedAt') ?? null,
+  }
 }

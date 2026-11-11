@@ -15,5 +15,5 @@
     "declaration": false,
     "sourceMap": false
   },
-  "files": ["src/index.ts"]
+  "files": ["src/index.ts", "src/report/contract.ts", "src/report/cli.ts", "src/report/custom-runner.ts"]
 }

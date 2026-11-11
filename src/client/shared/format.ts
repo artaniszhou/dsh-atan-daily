@@ -21,6 +21,30 @@ export function formatDuration(durationMs: number | null | undefined): string {
 }
 
 /**
+ * 把版本号（epoch 毫秒）格式化成 `YYYY-MM-DD HH:mm`。
+ * @param value - 服务端返回的 version。
+ * @returns 展示文本。
+ */
+export function formatVersion(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '—'
+  const date = new Date(value)
+  const pad = (part: number): string => String(part).padStart(2, '0')
+  return `${String(date.getFullYear())}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+    + `${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/**
+ * 把上传时间（yyyyMMddHHmmss）格式化成 `YYYY-MM-DD HH:mm`。
+ * @param value - 服务端返回的上传时间。
+ * @returns 展示文本；不是 14 位数字时原样返回。
+ */
+export function formatUploadedAt(value: string): string {
+  return /^\d{14}$/u.test(value)
+    ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)} ${value.slice(8, 10)}:${value.slice(10, 12)}`
+    : value
+}
+
+/**
  * 把 ISO 时间按指定时区格式化成 `YYYY-MM-DD HH:mm`。
  * @param iso - UTC 时间；null 表示没有。
  * @param timeZone - 任务的 IANA 时区；缺省时用浏览器本地时区。

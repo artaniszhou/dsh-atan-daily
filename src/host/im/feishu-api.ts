@@ -1,13 +1,16 @@
 /**
  * 飞书 OpenAPI 的最小客户端：只做"发"。
  *
- * 用到的三个接口：
+ * 用到的四个接口：
  *  - `POST /open-apis/auth/v3/tenant_access_token/internal` 换 token（缓存到过期前 5 分钟）
  *  - `POST /open-apis/im/v1/files` 上传文件拿 `file_key`
- *  - `POST /open-apis/im/v1/messages` 发消息（文本或文件）
+ *  - `POST /open-apis/im/v1/images` 上传图片拿 `image_key`（图片消息可直接显示）
+ *  - `POST /open-apis/im/v1/messages` 发消息（文本、文件或图片）
  *
  * 不订阅事件、不建长连接、不需要公网地址。
  */
+
+import { fileTypeOf } from './file-type.js'
 
 /** 一个飞书应用凭据。 */
 export interface FeishuApp {
@@ -97,6 +100,10 @@ export interface FeishuClient {
   uploadFile: (app: FeishuApp, fileName: string, bytes: Uint8Array, options?: CallOptions) => Promise<string>
   /** 发一条文件消息。 */
   sendFile: (app: FeishuApp, openId: string, fileKey: string, options?: CallOptions) => Promise<void>
+  /** 上传一张图片，返回 image_key；图片消息会直接在聊天里显示。 */
+  uploadImage: (app: FeishuApp, fileName: string, bytes: Uint8Array, options?: CallOptions) => Promise<string>
+  /** 发一条图片消息。 */
+  sendImage: (app: FeishuApp, openId: string, imageKey: string, options?: CallOptions) => Promise<void>
   /** 读机器人自身信息；失败返回 undefined（名称只是展示用）。 */
   botInfo: (app: FeishuApp, options?: CallOptions) => Promise<{ name?: string, openId?: string } | undefined>
   /** 丢弃某个应用的 token 缓存（凭据被重置后重试）。 */
@@ -180,9 +187,11 @@ export function createFeishuClient(deps: {
     botInfo,
     sendText: (app, openId, text, options = {}) => sendMessage(app, openId, 'text', { text }, options),
     sendFile: (app, openId, fileKey, options = {}) => sendMessage(app, openId, 'file', { file_key: fileKey }, options),
+    sendImage: (app, openId, imageKey, options = {}) => sendMessage(app, openId, 'image', { image_key: imageKey }, options),
     uploadFile: async (app, fileName, bytes, options = {}) => {
       const form = new FormData()
-      form.append('file_type', 'stream')
+      // 类型决定对方能否在聊天里直接预览：pdf 有原生预览，stream 只能下载。
+      form.append('file_type', fileTypeOf(fileName))
       form.append('file_name', fileName)
       // 复制成独立 ArrayBuffer：Blob 不接受带偏移的视图，且上传期间原缓冲可能被复用。
       const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
@@ -202,6 +211,28 @@ export function createFeishuClient(deps: {
         throw new FeishuError('feishu_no_file_key', '飞书没有返回 file_key')
       }
       return fileKey
+    },
+    uploadImage: async (app, fileName, bytes, options = {}) => {
+      const form = new FormData()
+      // 图片消息的 image_type 固定为 message；image 键是飞书要求的字段名。
+      form.append('image_type', 'message')
+      const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+      form.append('image', new Blob([buffer], { type: 'image/png' }), fileName)
+      const response = await fetchImpl(`${baseUrl(app.domain)}/open-apis/im/v1/images`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${await token(app, options)}` },
+        body: form,
+        signal: combined(options.signal),
+      })
+      const body = assertOk(await readJson(response, '上传图片'), '上传图片')
+      const data = body['data']
+      const imageKey = typeof data === 'object' && data !== null
+        ? (data as Record<string, unknown>)['image_key']
+        : undefined
+      if (typeof imageKey !== 'string' || imageKey === '') {
+        throw new FeishuError('feishu_no_image_key', '飞书没有返回 image_key')
+      }
+      return imageKey
     },
     forget: (appId) => { tokens.delete(appId) },
   }

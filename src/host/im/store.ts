@@ -33,12 +33,8 @@ function parseDocument(text: string): BotRecord[] {
     if (typeof row.platformId !== 'string' || row.platformId === '') continue
     if (typeof row.secretRef !== 'string' || row.secretRef === '') continue
     if (typeof row.ownerId !== 'string' || row.ownerId === '') continue
+    if (typeof row.name !== 'string' || row.name === '') continue
     const channel: ImChannel = row.channel === 'feishu' ? 'feishu' : 'feishu'
-    // 旧版本把用户起的名字存在 `alias`：迁移时优先用它，之后名字不再可改。
-    const legacy = raw as { alias?: unknown }
-    const displayName = typeof legacy.alias === 'string' && legacy.alias !== ''
-      ? legacy.alias
-      : typeof row.name === 'string' && row.name !== '' ? row.name : '飞书机器人'
     bots.push({
       botId: row.botId,
       channel,
@@ -46,7 +42,7 @@ function parseDocument(text: string): BotRecord[] {
       secretRef: row.secretRef,
       ownerId: row.ownerId,
       domain: row.domain === 'lark' ? 'lark' : 'feishu',
-      name: displayName,
+      name: row.name,
       createdAt: typeof row.createdAt === 'string' ? row.createdAt : new Date(0).toISOString(),
       ...typeof row.lastSend === 'object' && row.lastSend !== null
         ? {

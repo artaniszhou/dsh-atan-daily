@@ -6,8 +6,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import type { TaskRecord } from '../../protocol.js'
-import { RUN_MODEL, RUN_PERMISSION_PRESET, TURN_START_BOUND_MS } from '../config.js'
+import { DEFAULT_PERMISSION_LEVEL, type TaskRecord } from '../../protocol.js'
+import { RUN_MODEL, TURN_START_BOUND_MS } from '../config.js'
 import { buildPrompt } from '../tasks/prompt.js'
 import { RunFailure } from './failure.js'
 import { resolveRunModel } from './model.js'
@@ -38,6 +38,8 @@ export interface RunInput {
   task: TaskRecord
   sessionId: string
   report: string
+  /** 本轮中间件目录（`.meta/build/<runId>`）。 */
+  buildDir: string
   timeoutMs: number
 }
 
@@ -73,70 +75,76 @@ export async function waitForTurnStart(
 export function createRunExecutor(deps: RunExecutorDeps): RunExecutor {
   const turnStartBoundMs = deps.turnStartBoundMs ?? TURN_START_BOUND_MS
   const promptTimeoutMs = deps.promptTimeoutMs ?? 30_000
+  /** 正在被无人值守驱动的会话；审批闸门只在这些会话上生效。 */
+  const driving = new Set<string>()
+  deps.approval.gate(sessionId => driving.has(sessionId))
 
   return {
     async drive(input: RunInput): Promise<void> {
-      const resolved = await deps.sessions.resolveAgent(input.sessionId)
-      if ('error' in resolved) {
-        throw new RunFailure('agent_unavailable', `agent unavailable: ${JSON.stringify(resolved.error)}`)
-      }
-      const agent = resolved.agent
+      driving.add(input.sessionId)
       try {
-        deps.permissions.set(agent.session, RUN_PERMISSION_PRESET)
-      } catch (error: unknown) {
-        deps.logger.warn(`could not apply the ${RUN_PERMISSION_PRESET} preset: ${String(error)}`)
-      }
-      // The preset normally bundles `never`; this keeps the guarantee even when
-      // a profile overrides the preset table with an approval-asking bundle.
-      try {
-        deps.approval.setPolicy(agent, 'never')
-      } catch (error: unknown) {
-        deps.logger.warn(`could not set the approval policy to never: ${String(error)}`)
-      }
-      const selection = await resolveRunModel(deps.models).catch(() => undefined)
-      if (selection === undefined) {
-        deps.logger.warn(`model ${RUN_MODEL} is unavailable; the Session keeps its default`)
-      } else {
-        try {
-          await deps.sessions.selectModel({ sessionId: input.sessionId, ...selection })
-        } catch (error: unknown) {
-          deps.logger.warn(`could not select ${selection.provider}/${RUN_MODEL}: ${String(error)}`)
+        const resolved = await deps.sessions.resolveAgent(input.sessionId)
+        if ('error' in resolved) {
+          throw new RunFailure('agent_unavailable', `agent unavailable: ${JSON.stringify(resolved.error)}`)
         }
-      }
-
-      try {
-        await deps.sessions.prompt({
-          requestId: randomUUID(),
-          sessionId: input.sessionId,
-          mode: 'queue',
-          content: [{ type: 'text', text: buildPrompt(input.task, input.report) }],
-          clientTimeZone: input.task.timeZone,
-        }, AbortSignal.timeout(promptTimeoutMs))
-      } catch (error: unknown) {
-        throw new RunFailure('prompt_failed', `could not send the run prompt: ${String(error)}`)
-      }
-
-      await waitForTurnStart(agent, turnStartBoundMs)
-
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const timeout = new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
+        const agent = resolved.agent
+        // 权限级别按任务设置：默认只允许工作区内修改，需要跨目录读写时才选完全权限。
+        // 只套预设、不改审批策略：预设由「沙箱 + 审批」两个旋钮推导，擅自把审批
+        // 改成 never 会让旋钮失配，页面就会显示成「自定义」。
+        const preset = input.task.permissionLevel ?? DEFAULT_PERMISSION_LEVEL
+        try {
+          deps.permissions.set(agent.session, preset)
+        } catch (error: unknown) {
+          deps.logger.warn(`could not apply the ${preset} preset: ${String(error)}`)
+        }
+        // 越界审批由上面注册的闸门在运行期间直接拒绝，避免无人值守运行等待审批。
+        const selection = await resolveRunModel(deps.models).catch(() => undefined)
+        if (selection === undefined) {
+          deps.logger.warn(`model ${RUN_MODEL} is unavailable; the Session keeps its default`)
+        } else {
           try {
-            agent.cancel({ kind: 'hook', reason: 'atan-daily: run timeout' })
+            await deps.sessions.selectModel({ sessionId: input.sessionId, ...selection })
           } catch (error: unknown) {
-            deps.logger.warn(`could not cancel the timed-out run: ${String(error)}`)
+            deps.logger.warn(`could not select ${selection.provider}/${RUN_MODEL}: ${String(error)}`)
           }
-          reject(new RunFailure(
-            'timeout',
-            `run timed out after ${String(Math.round(input.timeoutMs / 1000))}s`,
-            'timeout',
-          ))
-        }, input.timeoutMs)
-      })
-      try {
-        await Promise.race([agent.whenIdle(), timeout])
+        }
+
+        try {
+          await deps.sessions.prompt({
+            requestId: randomUUID(),
+            sessionId: input.sessionId,
+            mode: 'queue',
+            content: [{ type: 'text', text: buildPrompt(input.task, input.buildDir, input.report) }],
+            clientTimeZone: input.task.timeZone,
+          }, AbortSignal.timeout(promptTimeoutMs))
+        } catch (error: unknown) {
+          throw new RunFailure('prompt_failed', `could not send the run prompt: ${String(error)}`)
+        }
+
+        await waitForTurnStart(agent, turnStartBoundMs)
+
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const timeout = new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            try {
+              agent.cancel({ kind: 'hook', reason: 'atan-daily: run timeout' })
+            } catch (error: unknown) {
+              deps.logger.warn(`could not cancel the timed-out run: ${String(error)}`)
+            }
+            reject(new RunFailure(
+              'timeout',
+              `run timed out after ${String(Math.round(input.timeoutMs / 1000))}s`,
+              'timeout',
+            ))
+          }, input.timeoutMs)
+        })
+        try {
+          await Promise.race([agent.whenIdle(), timeout])
+        } finally {
+          if (timer !== undefined) clearTimeout(timer)
+        }
       } finally {
-        if (timer !== undefined) clearTimeout(timer)
+        driving.delete(input.sessionId)
       }
     },
   }

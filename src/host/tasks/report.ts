@@ -1,43 +1,48 @@
 /**
- * 报告文件名选择。
+ * 报告基名的选择。
  *
- * 新报告写在任务根目录；撞名时追加数字后缀，保证旧报告永远不会被覆盖。
- * 归档目录 `history/` 里的名字也参与判重，避免同一秒重跑生成一个与历史报告
- * 同名的文件（两份同名报告会让「最新报告」的排序变得含糊）。
+ * 新一轮的基名写在任务根目录；撞名时追加 `-2`、`-3`，绝不覆盖旧报告。
+ * `history/` 里已归档的基名也参与判重：同一秒重跑时，上一轮可能已经被归档，
+ * 否则会生成与历史同名的基名，让「最新报告」的排序变得含糊。
  */
 
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { TaskRecord } from '../../protocol.js'
 import { HISTORY_DIR } from '../config.js'
-import { reportNameOf, REPORT_SUFFIX } from '../naming.js'
+import { reportBaseAt, reportBaseOf } from '../naming.js'
 
 /**
- * 列出任务根与归档目录里已经用掉的报告名。
+ * 列出任务根与归档目录里已经用掉的报告基名。
  * @param folder - 任务目录。
- * @returns 文件名列表；读不到的目录按空处理。
+ * @returns 基名集合；读不到的目录按空处理。
  */
-async function usedReportNames(folder: string): Promise<string[]> {
+async function usedReportBases(folder: string): Promise<Set<string>> {
   const [root, archived] = await Promise.all([
     readdir(folder).catch(() => [] as string[]),
     readdir(join(folder, HISTORY_DIR)).catch(() => [] as string[]),
   ])
-  return [...root, ...archived].filter(name => name.endsWith(REPORT_SUFFIX))
+  const bases = new Set<string>()
+  for (const name of [...root, ...archived]) {
+    const base = reportBaseOf(name)
+    if (base !== undefined) bases.add(base)
+  }
+  return bases
 }
 
 /**
- * 为本次运行挑一个报告文件名。
+ * 为本次运行挑一个报告基名。
  * @param task - 任务视图。
  * @param at - 运行开始的瞬间（可注入，便于测试）。
- * @returns 报告文件名。
+ * @returns 报告基名（不含扩展名）。
  */
-export async function nextReportName(task: TaskRecord, at: Date = new Date()): Promise<string> {
-  const names = await usedReportNames(task.folder)
-  const base = reportNameOf(at, task.timeZone)
+export async function nextReportBase(task: TaskRecord, at: Date = new Date()): Promise<string> {
+  const used = await usedReportBases(task.folder)
+  const base = reportBaseAt(at, task.timeZone, task.name)
   let candidate = base
   let suffix = 2
-  while (names.includes(candidate)) {
-    candidate = base.replace(/\.md$/u, `-${String(suffix)}.md`)
+  while (used.has(candidate)) {
+    candidate = `${base}-${String(suffix)}`
     suffix += 1
   }
   return candidate

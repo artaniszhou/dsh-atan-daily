@@ -10,6 +10,7 @@ export type AppErrorCode =
   | 'invalid_path'
   | 'not_found'
   | 'conflict'
+  | 'no_workspace'
   | 'already_running'
   | 'run_failed'
   | 'internal'

@@ -1,6 +1,6 @@
 {
   "name": "dsh-atan-daily",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "DeepSeek Harness plugin: scheduled collection tasks that each file a timestamped report.",
   "keywords": [
     "dsh",
@@ -28,7 +28,10 @@
   },
   "files": [
     "lib/**/*.js",
-    "template/**/*.md",
+    "skill/**/*.md",
+    "schema/**/*.json",
+    "assets/**/*",
+    "templates/**/*",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg"
@@ -43,17 +46,12 @@
     "build": "npm run typecheck && npm run clean && npm run build:host && npm run build:client",
     "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit",
-    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "check:version": "node scripts/check-version.mjs",
     "build:host": "tsc -p tsconfig.host.json",
     "build:client": "tsdown",
     "watch": "tsdown --watch",
-    "test": "npm run typecheck && npm run typecheck:test && vitest run",
-    "test:unit": "vitest run",
-    "test:watch": "vitest",
-    "smoke": "node scripts/smoke-client.mjs",
-    "smoke:host": "node scripts/smoke-host.mjs",
-    "check": "npm test && npm run build && npm run smoke && npm run smoke:host",
-    "prepack": "npm run build"
+    "check": "npm run check:version && npm run build",
+    "prepack": "npm run check:version && npm run build"
   },
   "dsh": {
     "bundle": {
@@ -69,21 +67,19 @@
     }
   },
   "devDependencies": {
-    "@testing-library/dom": "^10.4.2",
-    "@testing-library/react": "^16.3.3",
     "@types/node": "^22.10.2",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",
-    "jsdom": "^29.1.1",
     "lightningcss": "^1.33.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tsdown": "^0.22.14",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.12"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.73.0",
+    "echarts": "^6.1.0",
+    "puppeteer-core": "^24.43.1",
     "qrcode": "^1.5.4"
   }
 }

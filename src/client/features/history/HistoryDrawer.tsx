@@ -33,7 +33,7 @@ function retentionText(days: number): string {
 
 /** 运行历史抽屉。 */
 export function HistoryDrawer({ api, task, onClose, onOpenSession }: HistoryDrawerProps) {
-  const history = useRunHistory(api, task.id)
+  const history = useRunHistory(api, task.taskId)
 
   let body
   if (history.phase === 'loading') {

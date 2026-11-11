@@ -60,8 +60,11 @@ export interface PromptRequest {
 /** 会话端口。 */
 export interface SessionPort {
   create: (request: { workspaceId?: string, cwd?: string }) => Promise<{ sessionId: string }>
-  /** 只读检查会话是否存在；不存在时抛 `session/not-found`。 */
-  inspect: (sessionId: string, signal?: AbortSignal) => Promise<unknown>
+  /**
+   * 读取会话的持久化快照；会话不存在时返回 undefined。
+   * 读取失败会抛错，调用方不能把它当成“不存在”。
+   */
+  stat: (sessionId: string, signal?: AbortSignal) => Promise<unknown | undefined>
   resolveAgent: (sessionId: string) => Promise<{ agent: AgentFace } | { error: unknown }>
   prompt: (request: PromptRequest, signal: AbortSignal) => Promise<unknown>
   /** 为下一次请求安装模型。 */
@@ -94,9 +97,46 @@ export interface PermissionPresetPort {
   set: (session: unknown, preset: string) => void
 }
 
-/** 审批策略端口。 */
+/** 一份随插件注册的 skill；只暴露 Host 用到的字段。 */
+export interface SkillRegistration {
+  name: string
+  description: string
+  content: string
+  source: 'bundled'
+  /**
+   * 技能目录：注册后宿主把它渲染成「Base directory for this skill: …」，
+   * 模型据此按相对路径读取 `references/` 等资源。缺省时正文不能引用外部文件。
+   */
+  resourceBase?: { kind: 'directory', path: string }
+}
+
+/** 宿主 skill 注册表端口。 */
+export interface SkillPort {
+  /** 注册一份进程内 skill；返回卸载函数。 */
+  register: (skill: SkillRegistration) => () => void
+}
+
+/** 一次审批请求的最小面；`agent.id` 就是会话 id。 */
+export interface ApprovalRequestFace {
+  agent: { id: string }
+}
+
+/** 审批结论。 */
+export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+
+/**
+ * 审批闸门端口。
+ *
+ * 插件不直接改写会话的审批策略（否则会破坏权限预设的旋钮匹配，页面显示成
+ * 「自定义」）；改为在无人值守运行期间，抢在交互方之前拒绝该会话的审批请求。
+ */
 export interface ApprovalPort {
-  setPolicy: (agent: unknown, policy: 'ask' | 'never') => void
+  /**
+   * 安装预分发闸门：命中 `rejectFor` 的会话直接拒绝，不再询问交互方。
+   * @param rejectFor - 判断某个会话当前是否处于无人值守运行中。
+   * @returns 卸载函数。
+   */
+  gate: (rejectFor: (sessionId: string) => boolean) => () => void
 }
 
 /**

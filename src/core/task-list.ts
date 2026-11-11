@@ -5,36 +5,41 @@
  * snapshots and must go through `create` / `patch` / `remove` / `recordRun`;
  * no other module may write the JSONL file directly.
  *
- * v2 stores all task metadata here. `meta/rule.md` is task content only, so an
- * edit to cron/timezone/retention never rewrites the rule document.
+ * v3 stores all task metadata here. Task content lives in `task-detail.md` and
+ * `.meta/index.md` is a separate document, so an edit to cron/timezone/retention
+ * never rewrites either document.
+ *
+ * 身份与路径分开：`taskId` 是主键（UUID，改名不变），`folder` 是目录名（可变）。
+ * 用户改名时目录可以跟着变，而主键、运行记录与会话归属都不受影响。
  */
 
-import { copyFile, readFile, readdir, rename, stat } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { copyFile, readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { parseScheduleText } from './schedule-text.js'
+import {
+  DEFAULT_OUTPUT_FORMAT,
+  DEFAULT_PERMISSION_LEVEL,
+  type OutputFormat,
+  type PermissionLevel,
+} from '../protocol.js'
 import { isKnownTimeZone } from './cron.js'
 import { writeAtomic } from './fs.js'
-import {
-  CACHE_HEADING,
-  parseManifestRows,
-  parseLegacyRule,
-  SCRIPT_HEADING,
-  writeRuleContent,
-} from './rule.js'
+import { SHARE_DIR, TASK_DETAIL_NAME, taskStateDir } from './documents.js'
 import type { RunStatus } from './runs.js'
 
 /** The registry file at the working directory's root. */
 export const TASK_LIST_FILE = 'task-list.jsonl'
-/** The pre-JSONL registry. */
-export const LEGACY_TASK_LIST_FILE = 'task-list.md'
 
 /** How a task's execution time is expressed. */
 export type ScheduleMode = 'text' | 'cron' | 'manual'
 
-/** All task metadata; this is the v2 JSONL row. */
+/** All task metadata; this is the v3 JSONL row. */
 export interface TaskMeta {
-  v: 2
-  id: string
+  v: 3
+  /** 任务身份（UUID），创建时生成、改名不变；上传时作为链身份。 */
+  taskId: string
+  /** 任务目录名，可变；所有文件寻址只认它。 */
+  folder: string
   name: string
   createdAt: string
   scheduleMode: ScheduleMode
@@ -47,6 +52,12 @@ export interface TaskMeta {
   pushBotIds: string[]
   /** 推送开关：关掉保留目标但暂停发送。 */
   pushEnabled: boolean
+  /** 每次运行是否新建会话；默认 true。关掉后复用上一次会话。 */
+  newSession: boolean
+  /** 运行会话的权限级别，见 `PermissionLevel`；默认工作区内修改。 */
+  permissionLevel: PermissionLevel
+  /** 最终文档格式；默认 PNG。 */
+  outputFormat: OutputFormat
   sessionId: string | null
   lastRunAt: string | null
   lastStatus: RunStatus | null
@@ -59,6 +70,8 @@ export interface TaskMeta {
 /** Fields an edit or a run summary may change. */
 export interface TaskMetaPatch {
   name?: string
+  /** 新目录名；写回前由调用方完成 `fs.rename`。 */
+  folder?: string
   scheduleMode?: ScheduleMode
   cron?: string | null
   scheduleText?: string | null
@@ -67,6 +80,9 @@ export interface TaskMetaPatch {
   historyDays?: number
   pushBotIds?: string[]
   pushEnabled?: boolean
+  newSession?: boolean
+  permissionLevel?: PermissionLevel
+  outputFormat?: OutputFormat
   sessionId?: string | null
   lastRunAt?: string | null
   lastStatus?: RunStatus | null
@@ -87,25 +103,13 @@ export interface RunSummary {
 
 /** Store options. */
 export interface TaskListOptions {
-  /** Default retention for new/legacy tasks. */
+  /** Default retention for tasks created without one. */
   defaultHistoryDays: number
   /** Diagnostics sink. */
   warn?: (message: string) => void
 }
 
-/** A v1 row, read only for migration. */
-interface V1Row {
-  id?: unknown
-  name?: unknown
-  schedule?: unknown
-  enabled?: unknown
-  sessionId?: unknown
-  lastRunAt?: unknown
-  lastStatus?: unknown
-  lastError?: unknown
-}
-
-/** The run statuses accepted from legacy data. */
+/** The run statuses a stored row may carry. */
 const RUN_STATUSES: readonly RunStatus[] = [
   'running',
   'ok',
@@ -117,7 +121,10 @@ const RUN_STATUSES: readonly RunStatus[] = [
 ]
 
 /**
- * Whether a string is a single, safe task-folder segment.
+ * Whether a string is a single, safe task segment.
+ *
+ * 同时用于 `taskId` 与 `folder`：两者最终都会进 URL 或路径，任何能跳出工作目录
+ * 的取值都要在入口挡掉。
  * @param id - candidate id.
  * @returns true when it cannot escape the working directory.
  */
@@ -126,7 +133,7 @@ export function isSafeTaskId(id: string): boolean {
 }
 
 /**
- * The host's IANA zone, used when legacy data has none.
+ * The host's IANA zone, used for new tasks.
  * @returns an IANA zone name.
  */
 function hostTimeZone(): string {
@@ -147,36 +154,14 @@ function isRunStatus(value: string | undefined): value is RunStatus {
 }
 
 /**
- * Read task ids out of the legacy Markdown table.
- * @param text - the Markdown registry.
- * @returns ids in document order.
- */
-function parseLegacyMarkdown(text: string): string[] {
-  const ids: string[] = []
-  for (const line of text.split(/\r?\n/u)) {
-    const trimmed = line.trim()
-    if (!trimmed.startsWith('|')) continue
-    const cells = trimmed.replace(/^\|/u, '').replace(/\|$/u, '').split(/(?<!\\)\|/u)
-    const first = (cells[0] ?? '').trim()
-    if (first === '' || first === '任务目录' || /^-+$/u.test(first)) continue
-    const id = first.replace(/^`|`$/gu, '').replace(/\\\|/gu, '|').trim()
-    if (isSafeTaskId(id) && !ids.includes(id)) ids.push(id)
-  }
-  return ids
-}
-
-/**
  * Normalize the push target list.
- *
- * Accepts the v2 array, and the earlier single `pushBotId` string so old rows
- * keep their target after the field was widened to a list.
  * @param value - raw field value.
  * @returns unique, trimmed bot ids in their original order.
  */
 function normalizeBotIds(value: unknown): string[] {
-  const raw = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+  if (!Array.isArray(value)) return []
   const ids: string[] = []
-  for (const item of raw) {
+  for (const item of value) {
     if (typeof item !== 'string') continue
     const id = item.trim()
     if (id === '' || !/^[A-Za-z0-9_-]{1,64}$/u.test(id) || ids.includes(id)) continue
@@ -186,17 +171,33 @@ function normalizeBotIds(value: unknown): string[] {
 }
 
 /**
- * Normalize one parsed row, filling defaults for fields introduced in v2.
+ * Whether a value is one of the two known permission presets.
+ * @param value - raw field value.
+ * @returns true when it is a known preset name.
+ */
+function isPermissionLevel(value: unknown): value is PermissionLevel {
+  return value === 'workspace-write' || value === 'danger-full-access'
+}
+
+/**
+ * Normalize one parsed row.
  * @param row - parsed JSON.
  * @param fallbackHistoryDays - default retention.
  * @returns the normalized meta, or undefined when invalid.
  */
 function normalizeRow(
-  row: Partial<TaskMeta> & { id?: unknown, v?: unknown },
+  row: Partial<TaskMeta> & { taskId?: unknown, v?: unknown },
   fallbackHistoryDays: number,
 ): TaskMeta | undefined {
-  if (row.v !== 2 || typeof row.id !== 'string' || !isSafeTaskId(row.id)) return undefined
+  if (row.v !== 3 || typeof row.taskId !== 'string' || !isSafeTaskId(row.taskId)) return undefined
+  if (typeof row.folder !== 'string' || !isSafeTaskId(row.folder)) return undefined
   if (typeof row.name !== 'string') return undefined
+  if (!Array.isArray(row.pushBotIds)) return undefined
+  if (typeof row.newSession !== 'boolean') return undefined
+  if (!isPermissionLevel(row.permissionLevel)) return undefined
+  const outputFormat: OutputFormat = row.outputFormat === 'pdf' || row.outputFormat === 'png'
+    ? row.outputFormat
+    : DEFAULT_OUTPUT_FORMAT
   const mode: ScheduleMode = row.scheduleMode === 'text' || row.scheduleMode === 'cron' || row.scheduleMode === 'manual'
     ? row.scheduleMode
     : 'manual'
@@ -210,8 +211,9 @@ function normalizeRow(
   const cron = normalizedMode === 'manual' ? null : rawCron
   const scheduleText = normalizedMode === 'text' ? rawScheduleText : null
   return {
-    v: 2,
-    id: row.id,
+    v: 3,
+    taskId: row.taskId,
+    folder: row.folder,
     name: row.name,
     createdAt: typeof row.createdAt === 'string' ? row.createdAt : new Date(0).toISOString(),
     scheduleMode: normalizedMode,
@@ -220,8 +222,11 @@ function normalizeRow(
     timeZone: typeof row.timeZone === 'string' && isKnownTimeZone(row.timeZone) ? row.timeZone : hostTimeZone(),
     enabled: normalizedMode === 'manual' ? false : row.enabled !== false,
     historyDays,
-    pushBotIds: normalizeBotIds(row.pushBotIds ?? (row as { pushBotId?: unknown }).pushBotId),
+    pushBotIds: normalizeBotIds(row.pushBotIds),
     pushEnabled: row.pushEnabled === true,
+    newSession: row.newSession,
+    permissionLevel: row.permissionLevel,
+    outputFormat,
     sessionId: typeof row.sessionId === 'string' ? row.sessionId : null,
     lastRunAt: typeof row.lastRunAt === 'string' ? row.lastRunAt : null,
     lastStatus: typeof row.lastStatus === 'string' && isRunStatus(row.lastStatus) ? row.lastStatus : null,
@@ -239,7 +244,6 @@ function normalizeRow(
  */
 export class TaskListStore {
   private readonly path: string
-  private readonly legacyPath: string
   private readonly options: TaskListOptions
   private ready: Promise<void> | undefined
   private queue: Promise<void> = Promise.resolve()
@@ -249,8 +253,7 @@ export class TaskListStore {
    * @param options - defaults and diagnostics.
    */
   constructor(private readonly workDir: string, options: TaskListOptions) {
-    this.path = join(workDir, TASK_LIST_FILE)
-    this.legacyPath = join(workDir, LEGACY_TASK_LIST_FILE)
+    this.path = join(taskStateDir(workDir), TASK_LIST_FILE)
     this.options = {
       defaultHistoryDays: Number.isFinite(options.defaultHistoryDays) && options.defaultHistoryDays >= 0
         ? options.defaultHistoryDays
@@ -265,7 +268,7 @@ export class TaskListStore {
   }
 
   /**
-   * Ensure the registry is v2, migrating v1/Markdown when needed.
+   * Ensure the registry file is present and readable.
    * @returns a promise resolved when the registry is usable.
    */
   async ensure(): Promise<void> {
@@ -294,11 +297,11 @@ export class TaskListStore {
 
   /**
    * Read one task's metadata.
-   * @param id - task folder name.
+   * @param taskId - task identity.
    * @returns the metadata, or undefined.
    */
-  async get(id: string): Promise<TaskMeta | undefined> {
-    const found = (await this.readAll()).find(meta => meta.id === id)
+  async get(taskId: string): Promise<TaskMeta | undefined> {
+    const found = (await this.readAll()).find(meta => meta.taskId === taskId)
     return found === undefined ? undefined : { ...found }
   }
 
@@ -310,8 +313,11 @@ export class TaskListStore {
     await this.ensure()
     await this.enqueue(async () => {
       const records = await this.readAll()
-      if (records.some(record => record.id === meta.id)) {
-        throw Object.assign(new Error(`task ${meta.id} already exists`), { code: 'EEXIST' })
+      if (records.some(record => record.taskId === meta.taskId)) {
+        throw Object.assign(new Error(`task ${meta.taskId} already exists`), { code: 'EEXIST' })
+      }
+      if (records.some(record => record.folder === meta.folder)) {
+        throw Object.assign(new Error(`folder ${meta.folder} already exists`), { code: 'EEXIST' })
       }
       await this.writeAll([meta, ...records])
     })
@@ -319,24 +325,31 @@ export class TaskListStore {
 
   /**
    * Update one task's metadata.
-   * @param id - task id.
+   * @param taskId - task identity.
    * @param patch - allowed fields.
    * @returns the updated metadata.
    */
-  async patch(id: string, patch: TaskMetaPatch): Promise<TaskMeta> {
+  async patch(taskId: string, patch: TaskMetaPatch): Promise<TaskMeta> {
     await this.ensure()
     return await this.enqueue(async () => {
       const records = await this.readAll()
-      const index = records.findIndex(record => record.id === id)
-      if (index < 0) throw Object.assign(new Error(`task ${id} not found`), { code: 'ENOENT' })
+      const index = records.findIndex(record => record.taskId === taskId)
+      if (index < 0) throw Object.assign(new Error(`task ${taskId} not found`), { code: 'ENOENT' })
       const current = records[index]
-      if (current === undefined) throw Object.assign(new Error(`task ${id} not found`), { code: 'ENOENT' })
+      if (current === undefined) throw Object.assign(new Error(`task ${taskId} not found`), { code: 'ENOENT' })
       const updated: TaskMeta = {
         ...current,
         ...patch,
-        v: 2,
-        id: current.id,
+        v: 3,
+        taskId: current.taskId,
         updatedAt: new Date().toISOString(),
+      }
+      // 目录名是路径输入，不能只靠 create 时的校验：改名同样会写它。
+      if (!isSafeTaskId(updated.folder)) {
+        throw Object.assign(new Error(`invalid folder: ${updated.folder}`), { code: 'EINVAL' })
+      }
+      if (records.some(record => record.taskId !== taskId && record.folder === updated.folder)) {
+        throw Object.assign(new Error(`folder ${updated.folder} already exists`), { code: 'EEXIST' })
       }
       if (updated.scheduleMode === 'manual') {
         updated.cron = null
@@ -360,23 +373,23 @@ export class TaskListStore {
 
   /**
    * Remove one task row. The folder is the caller's responsibility.
-   * @param id - task id.
+   * @param taskId - task identity.
    */
-  async remove(id: string): Promise<void> {
+  async remove(taskId: string): Promise<void> {
     await this.ensure()
     await this.enqueue(async () => {
       const records = await this.readAll()
-      await this.writeAll(records.filter(record => record.id !== id))
+      await this.writeAll(records.filter(record => record.taskId !== taskId))
     })
   }
 
   /**
    * Write the latest-run summary.
-   * @param id - task id.
+   * @param taskId - task identity.
    * @param summary - run outcome fields.
    */
-  async recordRun(id: string, summary: RunSummary): Promise<void> {
-    await this.patch(id, {
+  async recordRun(taskId: string, summary: RunSummary): Promise<void> {
+    await this.patch(taskId, {
       ...summary.sessionId === undefined ? {} : { sessionId: summary.sessionId },
       lastRunAt: summary.lastRunAt,
       lastStatus: summary.lastStatus,
@@ -388,11 +401,11 @@ export class TaskListStore {
 
   /**
    * Point the task at its latest session.
-   * @param id - task id.
+   * @param taskId - task identity.
    * @param sessionId - the session, or null to clear.
    */
-  async setSession(id: string, sessionId: string | null): Promise<void> {
-    await this.patch(id, { sessionId })
+  async setSession(taskId: string, sessionId: string | null): Promise<void> {
+    await this.patch(taskId, { sessionId })
   }
 
   /**
@@ -405,7 +418,7 @@ export class TaskListStore {
       const kept: TaskMeta[] = []
       for (const record of records) {
         try {
-          if ((await stat(join(this.workDir, record.id))).isDirectory()) kept.push(record)
+          if ((await stat(join(this.workDir, record.folder))).isDirectory()) kept.push(record)
         } catch (error: unknown) {
           // Drop only a genuinely missing folder; a permission/transient error
           // must not silently remove the task from the registry.
@@ -449,7 +462,7 @@ export class TaskListStore {
       const trimmed = line.trim()
       if (trimmed === '') continue
       try {
-        const parsed = JSON.parse(trimmed) as Partial<TaskMeta> & { id?: unknown, v?: unknown }
+        const parsed = JSON.parse(trimmed) as Partial<TaskMeta> & { taskId?: unknown, v?: unknown }
         const meta = normalizeRow(parsed, this.options.defaultHistoryDays)
         if (meta === undefined) {
           this.options.warn?.(`ignoring an invalid task row in ${this.path}`)
@@ -474,42 +487,21 @@ export class TaskListStore {
   }
 
   /**
-   * Detect the current version and migrate.
+   * Make sure the registry file exists: restore it from the sibling backup, or
+   * rebuild it from the task folders that carry `task-detail.md`.
    */
   private async migrateIfNeeded(): Promise<void> {
-    let text = await this.readOptional(this.path)
-    // A truncated or unreadable registry can be recovered from the sibling
-    // backup written by `writeAll`. An existing *empty* file is a valid v2
-    // registry with zero tasks, so it must not resurrect rows from the backup.
-    if (text === undefined || (text.trim() !== '' && !this.hasV2Row(text))) {
-      const backup = await this.readOptional(`${this.path}.bak`)
-      if (backup !== undefined && this.hasV2Row(backup)) {
-        await writeAtomic(this.path, backup)
-        text = backup
-      }
-    }
+    const text = await this.readOptional(this.path)
     if (text !== undefined) {
-      text = text.replace(/^\uFEFF/u, '')
-      if (text.trim() === '') {
-        // A valid empty registry: no tasks, and no legacy migration to run.
-        await this.backupLegacyMarkdown()
-        return
-      }
-      if (this.hasV2Row(text)) {
-        await this.backupLegacyMarkdown()
-        return
-      }
-      await this.migrateFromV1(text)
-      return
+      const body = text.replace(/^\uFEFF/u, '')
+      // An existing *empty* file is a valid registry with zero tasks.
+      if (body.trim() === '' || this.hasV3Row(body)) return
     }
-    let legacyMarkdown: string | undefined
-    try {
-      legacyMarkdown = await readFile(this.legacyPath, 'utf8')
-    } catch {
-      legacyMarkdown = undefined
-    }
-    if (legacyMarkdown !== undefined) {
-      await this.migrateFromMarkdown(legacyMarkdown)
+    // The registry is missing or holds rows this build cannot read. Prefer the
+    // backup `writeAll` keeps beside it; otherwise rebuild from the folders.
+    const backup = await this.readOptional(`${this.path}.bak`)
+    if (backup !== undefined && this.hasV3Row(backup)) {
+      await writeAtomic(this.path, backup)
       return
     }
     await this.rebuildFromFolders()
@@ -530,96 +522,44 @@ export class TaskListStore {
   }
 
   /**
-   * Whether a registry text has at least one v2 row.
+   * Whether a registry text has at least one v3 row.
    * @param text - registry contents.
-   * @returns true when a v2 row is present.
+   * @returns true when a v3 row is present.
    */
-  private hasV2Row(text: string): boolean {
+  private hasV3Row(text: string): boolean {
     for (const line of text.split(/\r?\n/u)) {
       if (line.trim() === '') continue
       try {
-        if ((JSON.parse(line) as { v?: unknown }).v === 2) return true
+        if ((JSON.parse(line) as { v?: unknown }).v === 3) return true
       } catch {
-        // A malformed line is skipped; a later v2 row can still identify the file.
+        // A malformed line is skipped; a later v3 row can still identify the file.
       }
     }
     return false
   }
 
   /**
-   * Migrate a v1 JSONL registry (snapshots only) using rules for real metadata.
-   * @param text - current v1 file.
-   */
-  private async migrateFromV1(text: string): Promise<void> {
-    const v1 = new Map<string, V1Row>()
-    for (const line of text.split(/\r?\n/u)) {
-      if (line.trim() === '') continue
-      try {
-        const row = JSON.parse(line) as V1Row
-        if (typeof row.id === 'string' && isSafeTaskId(row.id)) v1.set(row.id, row)
-      } catch {
-        // A malformed v1 row is skipped; folder scanning below can still find it.
-      }
-    }
-    const ids = [...v1.keys()]
-    const metas: TaskMeta[] = []
-    for (const id of ids.length > 0 ? ids : await this.scanFolderIds()) {
-      const meta = await this.buildLegacyMeta(id, v1.get(id))
-      if (meta !== undefined) metas.push(meta)
-    }
-    await this.commitMigration(metas, `${this.path}.v1.bak`)
-    await this.backupLegacyMarkdown()
-    await this.cleanupLegacyRules(metas.map(meta => meta.id))
-  }
-
-  /**
-   * Migrate the Markdown registry.
-   * @param text - old `task-list.md`.
-   */
-  private async migrateFromMarkdown(text: string): Promise<void> {
-    const ids = parseLegacyMarkdown(text)
-    const list = ids.length > 0 ? ids : await this.scanFolderIds()
-    const metas: TaskMeta[] = []
-    for (const id of list) {
-      const meta = await this.buildLegacyMeta(id)
-      if (meta !== undefined) metas.push(meta)
-    }
-    await this.commitMigration(metas)
-    await this.backupLegacyMarkdown()
-    await this.cleanupLegacyRules(metas.map(meta => meta.id))
-  }
-
-  /**
-   * Rebuild from folders when no registry exists.
+   * Rebuild the registry from the task folders.
+   *
+   * Only folders that carry `task-detail.md` count; each starts as a manual,
+   * disabled task, so nothing runs until the user sets a time.
    */
   private async rebuildFromFolders(): Promise<void> {
     const metas: TaskMeta[] = []
     for (const id of await this.scanFolderIds()) {
-      const meta = await this.buildLegacyMeta(id)
+      const meta = await this.buildFolderMeta(id)
       if (meta !== undefined) metas.push(meta)
     }
-    await this.commitMigration(metas)
-    await this.cleanupLegacyRules(metas.map(meta => meta.id))
-  }
-
-  /**
-   * Write the migrated registry and back up the old one.
-   * @param metas - v2 records.
-   * @param backup - optional explicit backup source.
-   */
-  private async commitMigration(metas: readonly TaskMeta[], backup?: string): Promise<void> {
-    if (backup !== undefined) await copyFile(this.path, backup).catch(() => {})
     const text = metas.map(meta => JSON.stringify(meta)).join('\n') + (metas.length === 0 ? '' : '\n')
     await writeAtomic(this.path, text)
   }
 
   /**
-   * Build one v2 meta from a legacy rule and optional v1 row.
-   * @param id - task id.
-   * @param row - v1 snapshot, if any.
+   * Build default metadata for a task found on disk.
+   * @param id - task folder name.
    * @returns the meta, or undefined when the folder is gone.
    */
-  private async buildLegacyMeta(id: string, row?: V1Row): Promise<TaskMeta | undefined> {
+  private async buildFolderMeta(id: string): Promise<TaskMeta | undefined> {
     const folder = join(this.workDir, id)
     let birth: string
     try {
@@ -627,128 +567,35 @@ export class TaskListStore {
     } catch {
       return undefined
     }
-    let text = ''
-    try {
-      text = await readFile(join(folder, 'meta', 'rule.md'), 'utf8')
-    } catch {
-      // A folder without a rule is still registered, with empty details.
-    }
-    const legacy = parseLegacyRule(text, id, birth)
-    const fallbackName = typeof row?.name === 'string' ? row.name : id
-    const fallbackSchedule = typeof row?.schedule === 'string' ? row.schedule : undefined
-    const fallbackLastError = typeof row?.lastError === 'string' ? row.lastError : undefined
-    const legacyLastRun = legacy.lastRunAt ?? (typeof row?.lastRunAt === 'string' ? row.lastRunAt : undefined)
-    const legacyLastError = legacy.lastError ?? fallbackLastError
-    const rowStatus = typeof row?.lastStatus === 'string' ? row.lastStatus : undefined
-    const fallbackStatus = isRunStatus(rowStatus) ? rowStatus : undefined
-
-    let scheduleText = legacy.scheduleText ?? null
-    let cron = legacy.cron ?? null
-    let mode: ScheduleMode = legacy.hasMetadata
-      ? (scheduleText !== null ? 'text' : cron !== null ? 'cron' : 'manual')
-      : 'manual'
-    if (!legacy.hasMetadata && fallbackSchedule !== undefined && fallbackSchedule !== '') {
-      // v1 snapshots did not store cron separately; try the old text as a
-      // best-effort recovery, using the host zone.
-      const parsed = parseScheduleText(fallbackSchedule)
-      if (parsed === undefined) {
-        scheduleText = null
-        mode = 'manual'
-      } else {
-        scheduleText = fallbackSchedule
-        cron = parsed.cron
-        mode = 'text'
-      }
-    }
-    if (scheduleText !== null && cron === null) {
-      const parsed = parseScheduleText(scheduleText)
-      if (parsed === undefined) {
-        scheduleText = null
-        mode = 'manual'
-      } else {
-        cron = parsed.cron
-        mode = 'text'
-      }
-    }
-    const lastStatus = isRunStatus(legacy.lastStatus)
-      ? legacy.lastStatus
-      : fallbackStatus ?? (legacyLastRun === undefined ? null : legacyLastError === undefined ? 'ok' : 'failed')
     return {
-      v: 2,
-      id,
-      name: legacy.name ?? fallbackName,
-      createdAt: legacy.createdAt ?? birth,
-      scheduleMode: mode,
-      cron,
-      scheduleText: mode === 'text' ? scheduleText : null,
-      timeZone: legacy.timeZone !== undefined && isKnownTimeZone(legacy.timeZone)
-        ? legacy.timeZone
-        : hostTimeZone(),
-      enabled: mode === 'manual'
-        ? false
-        : legacy.hasMetadata
-          ? legacy.enabled === true
-          : row?.enabled !== false,
+      v: 3,
+      taskId: randomUUID(),
+      folder: id,
+      name: id,
+      createdAt: birth,
+      scheduleMode: 'manual',
+      cron: null,
+      scheduleText: null,
+      timeZone: hostTimeZone(),
+      enabled: false,
       historyDays: this.options.defaultHistoryDays,
       pushBotIds: [],
       pushEnabled: false,
-      sessionId: legacy.sessionId ?? (typeof row?.sessionId === 'string' ? row.sessionId : null),
-      lastRunAt: legacyLastRun ?? null,
-      lastStatus,
-      lastDurationMs: legacy.lastDurationMs ?? null,
-      lastRunId: legacy.lastRunId ?? null,
-      lastError: legacy.lastError ?? fallbackLastError ?? null,
+      newSession: true,
+      permissionLevel: DEFAULT_PERMISSION_LEVEL,
+      outputFormat: DEFAULT_OUTPUT_FORMAT,
+      sessionId: null,
+      lastRunAt: null,
+      lastStatus: null,
+      lastDurationMs: null,
+      lastRunId: null,
+      lastError: null,
       updatedAt: new Date().toISOString(),
     }
   }
 
   /**
-   * Rewrite migrated legacy rules as content-only, keeping a backup.
-   * @param ids - task ids to clean.
-   */
-  private async cleanupLegacyRules(ids: readonly string[]): Promise<void> {
-    for (const id of ids) {
-      const folder = join(this.workDir, id)
-      let text: string
-      try {
-        text = await readFile(join(folder, 'meta', 'rule.md'), 'utf8')
-      } catch {
-        continue
-      }
-      if (!text.trimStart().startsWith('---')) continue
-      const legacy = parseLegacyRule(text, id, new Date().toISOString())
-      try {
-        await copyFile(join(folder, 'meta', 'rule.md'), join(folder, 'meta', 'rule.md.v1.bak')).catch(() => {})
-        await writeRuleContent(
-          folder,
-          legacy.details,
-          parseManifestRows(text, CACHE_HEADING),
-          parseManifestRows(text, SCRIPT_HEADING),
-        )
-      } catch (error: unknown) {
-        this.options.warn?.(`could not rewrite ${id}/meta/rule.md: ${String(error)}`)
-      }
-    }
-  }
-
-  /**
-   * Move the legacy Markdown registry out of the way, keeping a backup.
-   */
-  private async backupLegacyMarkdown(): Promise<void> {
-    try {
-      await stat(this.legacyPath)
-    } catch {
-      return
-    }
-    try {
-      await rename(this.legacyPath, `${this.legacyPath}.bak`)
-    } catch {
-      await rename(this.legacyPath, `${this.legacyPath}.bak-${Date.now()}`).catch(() => {})
-    }
-  }
-
-  /**
-   * List folders that contain a `meta/rule.md`.
+   * List folders that carry `task-detail.md`.
    * @returns task ids.
    */
   private async scanFolderIds(): Promise<string[]> {
@@ -762,7 +609,7 @@ export class TaskListStore {
     for (const entry of entries) {
       if (!entry.isDirectory() || !isSafeTaskId(entry.name)) continue
       try {
-        await stat(join(this.workDir, entry.name, 'meta', 'rule.md'))
+        await stat(join(this.workDir, entry.name, SHARE_DIR, TASK_DETAIL_NAME))
         ids.push(entry.name)
       } catch {
         // Not a task folder.

@@ -1,0 +1,86 @@
+/**
+ * 公告条：一行标题 + 可选展开的正文。
+ *
+ * 折叠态标题单行省略；展开态标题完整换行、正文限高滚动。
+ * 无公告时组件不渲染，所以这里没有「空态」样式。
+ */
+.banner {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md);
+}
+
+.icon {
+  display: flex;
+  flex: none;
+  margin-top: 2px;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 展开后标题完整显示：窄窗口里 60 字的标题也能读全。 */
+.banner[data-expanded='true'] .title {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.toggle {
+  flex: none;
+  padding: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 20px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.toggle:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+
+.content {
+  max-height: 240px;
+  margin: 8px 0 0;
+  overflow-y: auto;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  white-space: pre-wrap;
+}

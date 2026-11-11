@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atan-daily.local/contract/report-contract.v2.json",
+  "title": "阿碳日报 · 报告数据契约（report-contract/v2）",
+  "description": "校验任务目录下的 .meta/schema/schema.json：JSON Schema 数据定义 + x-blocks 块树（显示组件 → 数据）。",
+  "type": "object",
+  "required": ["x-revision", "type", "properties", "x-blocks"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": { "type": "string" },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "x-revision": { "type": "integer", "minimum": 1 },
+    "x-summary": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 60,
+      "description": "任务的一句话简介，由 task-detail.md 生成，上传任务仓库时使用"
+    },
+    "x-tags": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 2, "maxLength": 12 },
+      "description": "任务标签，由 task-detail.md 生成，上传任务仓库时使用"
+    },
+    "x-detail-hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "生成这份契约时 task-detail.md 的内容指纹，用于运行前判断明细是否变更"
+    },
+    "x-changelog": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "每次破坏性变更一行，写清楚改了什么、为什么"
+    },
+    "x-task": { "type": "string", "description": "任务名，便于人读" },
+    "x-theme": { "type": "string", "description": "默认主题名；report.json 的 theme 可覆盖" },
+    "type": { "enum": ["object"], "description": "契约根必须是对象：报告数据按字段组织" },
+    "required": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "additionalProperties": {
+      "anyOf": [{ "type": "boolean" }, { "$ref": "#/$defs/node" }]
+    },
+    "properties": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/node" }
+    },
+    "$defs": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/node" }
+    },
+    "x-blocks": {
+      "type": "array",
+      "minItems": 1,
+      "description": "报告版面：显示组件按顺序组成块树，用 source / fields 绑定数据字段",
+      "items": { "$ref": "#/$defs/block" }
+    }
+  },
+  "$defs": {
+    "typeName": {
+      "anyOf": [
+        { "enum": ["object", "array", "string", "number", "integer", "boolean", "null"] },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["object", "array", "string", "number", "integer", "boolean", "null"] }
+        }
+      ]
+    },
+    "node": {
+      "anyOf": [{ "type": "boolean" }, { "$ref": "#/$defs/nodeObject" }]
+    },
+    "nodeObject": {
+      "type": "object",
+      "properties": {
+        "$ref": { "type": "string", "pattern": "^#" },
+        "type": { "$ref": "#/$defs/typeName" },
+        "properties": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/node" }
+        },
+        "required": { "type": "array", "items": { "type": "string" } },
+        "additionalProperties": {
+          "anyOf": [{ "type": "boolean" }, { "$ref": "#/$defs/node" }]
+        },
+        "items": {
+          "anyOf": [
+            { "$ref": "#/$defs/node" },
+            { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } }
+          ]
+        },
+        "minProperties": { "type": "integer", "minimum": 0 },
+        "maxProperties": { "type": "integer", "minimum": 0 },
+        "minItems": { "type": "integer", "minimum": 0 },
+        "maxItems": { "type": "integer", "minimum": 0 },
+        "minLength": { "type": "integer", "minimum": 0 },
+        "maxLength": { "type": "integer", "minimum": 0 },
+        "pattern": { "type": "string" },
+        "format": { "enum": ["date", "date-time", "uri"] },
+        "enum": { "type": "array", "minItems": 1 },
+        "const": {},
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "anyOf": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } },
+        "oneOf": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "default": {},
+        "examples": { "type": "array" },
+        "deprecated": { "type": "boolean" },
+        "x-label": { "type": "string", "description": "表头 / 指标名 / 图例名 / 键值行名" },
+        "x-shape": { "enum": ["tree"], "description": "这个数组的元素是树形结构（children 递归），供 tree / treemap / sunburst 使用" },
+        "x-unit": { "type": "string", "description": "单位，如 % 或 亿元" },
+        "x-format": {
+          "enum": ["percent", "money", "count", "date", "ratio", "integer"],
+          "description": "数字的显示格式"
+        }
+      }
+    },
+    "series": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "系列类型。允许值由 lint 校验，清单在 src/report/series.ts"
+        },
+        "y": { "type": "string", "description": "单值系列的纵轴字段名（必须在 items.properties 里）" },
+        "fields": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "type": "string" },
+          "description": "多字段系列：candlestick 4 个、boxplot 5 个、radar/parallel 多个维度、themeRiver 2 个"
+        },
+        "value": { "type": "string", "description": "heatmap 的数值字段名" },
+        "name": { "type": "string", "description": "图例名，缺省用字段的 x-label" },
+        "yAxisIndex": { "type": "integer", "minimum": 0, "description": "用第几根纵轴，0 起" },
+        "stack": { "type": "boolean", "description": "堆叠" },
+        "smooth": { "type": "boolean", "description": "平滑曲线" },
+        "tone": { "enum": ["info", "ok", "warn", "err"], "description": "语义色，缺省按色板顺序" },
+        "min": { "type": "number", "description": "gauge 量程下限，默认 0" },
+        "max": { "type": "number", "description": "gauge 量程上限，默认 100" },
+        "donut": { "type": "boolean", "description": "pie：false 为实心饼图，默认环形" },
+        "rose": { "enum": ["radius", "area"], "description": "pie：玫瑰图" },
+        "labelPosition": { "enum": ["inside", "outside", "none"], "description": "pie：标签位置" },
+        "showValue": { "type": "boolean", "description": "bar/line/heatmap：在图形上标数值" },
+        "step": { "type": "boolean", "description": "line：阶梯线" },
+        "size": { "type": "string", "description": "scatter：用哪个字段决定点大小" },
+        "filled": { "type": "boolean", "description": "radar：false 为仅线不填充" },
+        "sort": { "enum": ["ascending", "descending"], "description": "funnel：排序方向" },
+        "gap": { "type": "number", "description": "funnel：块间距" },
+        "layout": { "enum": ["circular", "none"], "description": "graph：布局；force 已禁用" },
+        "script": { "type": "string", "description": "custom：相对 .meta/ 的脚本路径，例如 charts/flow.mjs" }
+      }
+    },
+    "axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "unit": { "type": "string" },
+        "position": { "enum": ["left", "right"] }
+      }
+    },
+    "block": {
+      "type": "object",
+      "required": ["component"],
+      "additionalProperties": false,
+      "properties": {
+        "component": {
+          "enum": [
+            "heading", "paragraph", "list", "quote", "note", "divider",
+            "kv", "metrics", "table", "timeline", "chart",
+            "columns", "card"
+          ]
+        },
+        "source": { "type": "string", "description": "绑定到哪个顶层字段" },
+        "links": { "type": "string", "description": "graph：边数组的字段名（元素含 source / target / value）" },
+        "map": { "enum": ["china", "world"], "description": "地图底图；配合 series.fields: [经度, 纬度, 权重]" },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "kv 专用：要展示的顶层字段名，顺序即行序"
+        },
+        "text": { "type": "string", "description": "heading / paragraph / quote / note 的正文" },
+        "cite": { "type": "string", "description": "quote 的出处" },
+        "title": { "type": "string", "description": "块标题：表格小标题、卡片标题、图表图注" },
+        "level": { "type": "integer", "minimum": 1, "maximum": 3, "description": "heading 级别，1–2 起新分区，3 为小节" },
+        "ordered": { "type": "boolean", "description": "list 是否有序" },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "list 的静态条目；也可改用 source 绑定数组字段"
+        },
+        "tone": { "enum": ["info", "ok", "warn", "err"], "description": "note 的语气" },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "table 的列白名单与列序"
+        },
+        "sort": { "type": "string", "description": "table：`-field` 降序，`+field` 升序" },
+        "foldAbove": { "type": "integer", "minimum": 1, "description": "table：超过多少行折叠" },
+        "limit": { "type": "integer", "minimum": 1, "description": "table：最多展示多少行" },
+        "series": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/series" },
+          "description": "chart 的系列列表；多个系列即组合图"
+        },
+        "yAxes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/axis" },
+          "description": "chart 的纵轴定义，与 series[].yAxisIndex 对应"
+        },
+        "unit": { "type": "string", "description": "chart：纵轴单位" },
+        "x": { "type": "string", "description": "chart：横轴字段名（类别轴 / 散点的 x）" },
+        "height": { "type": "integer", "minimum": 80, "maximum": 640, "description": "chart 高度，像素" },
+        "legend": { "type": "boolean", "description": "chart：是否显示图例" },
+        "ratio": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": { "type": "number", "minimum": 0 },
+          "description": "columns 的列宽比例"
+        },
+        "children": {
+          "anyOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/block" },
+              "description": "card 的子块"
+            },
+            {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/block" }
+              },
+              "description": "columns 的每栏一组块，与 ratio 一一对应"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

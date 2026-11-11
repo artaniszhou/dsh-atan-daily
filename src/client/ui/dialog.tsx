@@ -28,6 +28,8 @@ const FOCUSABLE = [
 export interface DialogProps {
   /** `modal` 居中，`drawer` 贴右侧。 */
   variant?: 'modal' | 'drawer'
+  /** `full` 用近全屏尺寸，给对比面板用。 */
+  size?: 'md' | 'full'
   title: string
   subtitle?: string
   /** 关闭按钮的无障碍名（沿用调用方语言的“关闭”文案）。 */
@@ -106,14 +108,15 @@ export function useDialog(onClose: () => void): {
 }
 
 /** 通用弹层。 */
-export function Dialog({ variant = 'modal', title, subtitle, closeLabel, onClose, children, footer }: DialogProps) {
+export function Dialog({ variant = 'modal', size = 'md', title, subtitle, closeLabel, onClose, children, footer }: DialogProps) {
   const { closeRef, cardRef, onOverlayClick } = useDialog(onClose)
+  const full = size === 'full'
   return (
     <div className={cx(css.overlay, variant === 'drawer' && css.overlayDrawer)} onClick={onOverlayClick}>
       <section
         ref={cardRef}
         tabIndex={-1}
-        className={cx(css.card, variant === 'drawer' ? css.drawerCard : css.modalCard)}
+        className={cx(css.card, variant === 'drawer' ? css.drawerCard : css.modalCard, full && css.fullCard)}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -127,7 +130,7 @@ export function Dialog({ variant = 'modal', title, subtitle, closeLabel, onClose
             <IconClose />
           </IconButton>
         </div>
-        <div className={variant === 'drawer' ? css.drawerBody : css.body}>{children}</div>
+        <div className={cx(variant === 'drawer' ? css.drawerBody : css.body, full && css.fullBody)}>{children}</div>
         {footer === undefined ? null : <div className={css.foot}>{footer}</div>}
       </section>
     </div>

@@ -21,19 +21,21 @@ import { maskAppId, type BotRecord, type SendOutcome } from './types.js'
 export const WELCOME_TEXT = '阿碳日报已接入。之后任务报告会发到这个对话里。'
 
 /**
- * 一份报告在对话里的抬头：任务名 + 报告名。
+ * 一份报告在对话里的抬头：任务名 + 报告基名。
  *
  * 只作为文本消息发出，报告文件（本地名与飞书里的文档名）保持原样。
  * @param task - 任务视图。
- * @param report - 报告文件名。
+ * @param base - 报告基名（不含扩展名）。
  * @returns 抬头文本。
  */
-export function reportTitleOf(task: Pick<TaskRecord, 'name'>, report: string): string {
-  return `${task.name} · ${report}`
+export function reportTitleOf(task: Pick<TaskRecord, 'name'>, base: string): string {
+  return `${task.name} · ${base}`
 }
 
 /** 飞书单文件上限（30 MB）。 */
 export const MAX_FILE_BYTES = 30 * 1024 * 1024
+/** 飞书图片消息上限（10 MB）；超过时回退成文件消息。 */
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 /** 服务依赖。 */
 export interface BotServiceDeps {
@@ -225,16 +227,17 @@ export function createBotService(deps: BotServiceDeps): BotService {
       if (report === undefined || report === '') {
         return { ok: false, code: 'report_missing', message: '本次运行没有生成报告。', sent: 0, total }
       }
+      // 一轮是一组同基名的文件，这里挑最适合推送的那份（PDF 优先，飞书能直接预览）。
       // 报告可能已经被下一轮运行归档进 history/，两处都要找。
-      const path = await reportPathOf(task.folder, report)
-      if (path === undefined) {
+      const file = await reportPathOf(task.folder, report)
+      if (file === undefined) {
         return { ok: false, code: 'report_missing', message: `报告文件不存在：${report}`, sent: 0, total }
       }
       let bytes: Buffer
       try {
-        bytes = await readFile(path)
+        bytes = await readFile(file.path)
       } catch {
-        return { ok: false, code: 'report_missing', message: `报告文件不存在：${report}`, sent: 0, total }
+        return { ok: false, code: 'report_missing', message: `报告文件不存在：${file.name}`, sent: 0, total }
       }
       if (bytes.byteLength > MAX_FILE_BYTES) {
         return { ok: false, code: 'file_too_large', message: '报告超过 30 MB，飞书拒绝上传。', sent: 0, total }
@@ -247,12 +250,27 @@ export function createBotService(deps: BotServiceDeps): BotService {
       for (const { bot, secret } of targets) {
         const app = { appId: bot.platformId, appSecret: secret, domain: bot.domain }
         try {
-          const fileKey = await deps.client.uploadFile(app, report, new Uint8Array(bytes))
-          // 抬头是一行普通文本，发在文件前面；它失败不影响文件本身送达。
+          // 抬头是一行普通文本，发在图片/文件前面；它失败不影响正文送达。
           await deps.client.sendText(app, bot.ownerId, title).catch((error: unknown) => {
             const message = error instanceof Error ? error.message : String(error)
             deps.logger.warn(`报告抬头发送失败（${bot.botId}）：${message}`)
           })
+
+          // PNG 走图片消息，飞书会在聊天里直接显示；失败或超过 10MB 时回退文件。
+          if (file.format === 'png' && bytes.byteLength <= MAX_IMAGE_BYTES) {
+            try {
+              const imageKey = await deps.client.uploadImage(app, file.name, new Uint8Array(bytes))
+              await deps.client.sendImage(app, bot.ownerId, imageKey)
+              await deps.store.update(bot.botId, { lastSend: { at: at(), ok: true } }).catch(() => {})
+              sent += 1
+              continue
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : String(error)
+              deps.logger.warn(`图片消息发送失败，回退文件（${bot.botId}）：${message}`)
+            }
+          }
+
+          const fileKey = await deps.client.uploadFile(app, file.name, new Uint8Array(bytes))
           await deps.client.sendFile(app, bot.ownerId, fileKey)
           await deps.store.update(bot.botId, { lastSend: { at: at(), ok: true } }).catch(() => {})
           sent += 1

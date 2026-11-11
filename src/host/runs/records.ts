@@ -6,8 +6,6 @@
  * 旧任务的摘要写进新目录。
  */
 
-import { stat } from 'node:fs/promises'
-import { join } from 'node:path'
 import { writeAtomic } from '../../core/fs.js'
 import {
   newRunId,
@@ -19,9 +17,11 @@ import {
   type RunTrigger,
 } from '../../core/runs.js'
 import type { TaskListStore } from '../../core/task-list.js'
+import type { Workspace } from '../settings/hub.js'
 import type { TaskRecord } from '../../protocol.js'
 import { PLUGIN_VERSION } from '../config.js'
 import type { Logger } from '../ports.js'
+import { reportExistsAt } from '../tasks/archive.js'
 
 /** 一次运行的不可变身份。 */
 export interface RunContext {
@@ -42,6 +42,8 @@ export interface RunOutcome {
   status: RunStatus
   sessionId?: string
   report?: string
+  /** 本轮中间件目录。 */
+  buildDir?: string
   error?: RunError
   reason?: string
 }
@@ -58,7 +60,8 @@ export interface RunSummary {
 
 /** 运行记录服务依赖。 */
 export interface RunRecordsDeps {
-  store: () => TaskListStore
+  /** 当前工作区；未配置时抛 `no_workspace`。 */
+  workspace: () => Workspace
   logger: Logger
   bootId: string
   pluginVersion?: string
@@ -95,18 +98,18 @@ export function createRunRecords(deps: RunRecordsDeps): RunRecords {
   }
 
   async function summarize(task: TaskRecord, summary: RunSummary): Promise<void> {
-    await deps.store().recordRun(task.id, summary).catch((error: unknown) => {
-      deps.logger.warn(`could not update the summary of ${task.id}: ${String(error)}`)
+    await deps.workspace().store.recordRun(task.taskId, summary).catch((error: unknown) => {
+      deps.logger.warn(`could not update the summary of ${task.taskId}: ${String(error)}`)
     })
   }
 
   async function pruneHistory(task: TaskRecord, force = false): Promise<void> {
     const at = now().getTime()
-    const last = lastPrune.get(task.id) ?? 0
+    const last = lastPrune.get(task.taskId) ?? 0
     if (!force && at - last < 60 * 60 * 1000) return
-    lastPrune.set(task.id, at)
+    lastPrune.set(task.taskId, at)
     const removed = await pruneRunRecords(task.folder, task.historyDays, at)
-    if (removed > 0) deps.logger.info(`pruned ${String(removed)} run record(s) of ${task.id}`)
+    if (removed > 0) deps.logger.info(`pruned ${String(removed)} run record(s) of ${task.taskId}`)
   }
 
   return {
@@ -114,14 +117,14 @@ export function createRunRecords(deps: RunRecordsDeps): RunRecords {
       const at = now()
       const context: RunContext = {
         runId: newRunId(at),
-        taskId: task.id,
+        taskId: task.taskId,
         taskFolder: task.folder,
         trigger,
         catchUp,
         scheduledFor: scheduledFor === undefined ? null : new Date(scheduledFor).toISOString(),
         startedAt: at.toISOString(),
         bootId: deps.bootId,
-        store: deps.store(),
+        store: deps.workspace().store,
       }
       const record: RunRecord = {
         v: 1,
@@ -155,11 +158,8 @@ export function createRunRecords(deps: RunRecordsDeps): RunRecords {
       const report = outcome.report ?? null
       let reportExists: boolean | null = null
       if (report !== null) {
-        try {
-          reportExists = (await stat(join(task.folder, report))).isFile()
-        } catch {
-          reportExists = false
-        }
+        // 一轮报告是一组同基名的文件，任一格式存在就算产出成功。
+        reportExists = await reportExistsAt(task.folder, report)
       }
       const record: RunRecord = {
         v: 1,
@@ -187,7 +187,7 @@ export function createRunRecords(deps: RunRecordsDeps): RunRecords {
       }
       // Summary traffic goes through the store captured at begin(), not the
       // current working directory's store.
-      await context.store.recordRun(task.id, {
+      await context.store.recordRun(task.taskId, {
         ...outcome.sessionId === undefined ? {} : { sessionId: outcome.sessionId },
         lastRunAt: finishedAt,
         lastStatus: outcome.status,
@@ -195,10 +195,10 @@ export function createRunRecords(deps: RunRecordsDeps): RunRecords {
         lastRunId: context.runId,
         lastError: outcome.error?.message ?? null,
       }).catch((error: unknown) => {
-        deps.logger.warn(`could not update the summary of ${task.id}: ${String(error)}`)
+        deps.logger.warn(`could not update the summary of ${task.taskId}: ${String(error)}`)
       })
       await pruneHistory(task).catch((error: unknown) => {
-        deps.logger.warn(`could not prune the history of ${task.id}: ${String(error)}`)
+        deps.logger.warn(`could not prune the history of ${task.taskId}: ${String(error)}`)
       })
     },
 
@@ -206,14 +206,14 @@ export function createRunRecords(deps: RunRecordsDeps): RunRecords {
       const at = now()
       const context: RunContext = {
         runId: newRunId(at),
-        taskId: task.id,
+        taskId: task.taskId,
         taskFolder: task.folder,
         trigger: 'schedule',
         catchUp: false,
         scheduledFor: new Date(scheduledFor).toISOString(),
         startedAt: at.toISOString(),
         bootId: deps.bootId,
-        store: deps.store(),
+        store: deps.workspace().store,
       }
       const record: RunRecord = {
         v: 1,
@@ -235,7 +235,7 @@ export function createRunRecords(deps: RunRecordsDeps): RunRecords {
         reason,
       }
       await write(context, record).catch((error: unknown) => {
-        deps.logger.warn(`could not write the skip record of ${task.id}: ${String(error)}`)
+        deps.logger.warn(`could not write the skip record of ${task.taskId}: ${String(error)}`)
       })
     },
 

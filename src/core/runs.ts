@@ -3,14 +3,11 @@
  *
  * One run is one JSON file, directly under the task's runs folder:
  *
- *   <task>/meta/runs/<runId>.json
+ *   <task>/.meta/runs/<runId>.json
  *
  * The file is written once when the run starts with `status: "running"`, and
  * rewritten atomically when the run finishes. A file still marked running after
  * a Host restart is the crash signal the startup sweep looks for.
- *
- * A record may also sit in a `meta/runs/YYYY-MM/` month subdirectory; listings
- * scan those too, and the retention sweep removes the directory once empty.
  *
  * This module owns the record shape, run ids, reads, and the retention sweep.
  * Writing goes through the Host's atomic writer so Windows rename races are
@@ -18,18 +15,16 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { readdir, readFile, rm, rmdir, stat } from 'node:fs/promises'
+import { readdir, readFile, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { metaDirOf } from './documents.js'
 import type { RunError, RunRecord, RunStatus, RunTrigger } from '../protocol.js'
 
 /** 运行记录的字段与状态来自共享契约，host 侧只做再导出。 */
 export type { RunError, RunRecord, RunStatus, RunTrigger } from '../protocol.js'
 
-/** Where run files live inside a task folder. */
-const META_DIR = 'meta'
+/** Runs folder inside `.meta/`. */
 const RUNS_DIR = 'runs'
-/** A legacy month subdirectory: `YYYY-MM`. */
-const LEGACY_MONTH = /^\d{4}-\d{2}$/u
 
 /** Every status a record may carry; used to reject hand-edited files. */
 const STATUSES: readonly RunStatus[] = [
@@ -63,12 +58,12 @@ export function newRunId(at: Date): string {
  * @returns the absolute file path.
  */
 export function runFilePath(taskFolder: string, runId: string): string {
-  return join(taskFolder, META_DIR, RUNS_DIR, `${runId}.json`)
+  return join(metaDirOf(taskFolder), RUNS_DIR, `${runId}.json`)
 }
 
 /** The directory holding every run of one task. */
 export function runsRootOf(taskFolder: string): string {
-  return join(taskFolder, META_DIR, RUNS_DIR)
+  return join(metaDirOf(taskFolder), RUNS_DIR)
 }
 
 /**
@@ -100,11 +95,8 @@ interface RunFileRef {
 
 /**
  * List every run file of one task, newest name first.
- *
- * New records live directly in `meta/runs/`; a legacy `YYYY-MM/` subdirectory
- * is still scanned so records written before the flattening stay visible.
  * @param taskFolder - absolute task directory.
- * @returns the candidate files, deduplicated by name and sorted newest first.
+ * @returns the candidate files, sorted newest first.
  */
 async function collectRunFiles(taskFolder: string): Promise<RunFileRef[]> {
   const root = runsRootOf(taskFolder)
@@ -114,26 +106,12 @@ async function collectRunFiles(taskFolder: string): Promise<RunFileRef[]> {
   } catch {
     return []
   }
-  const byName = new Map<string, string>()
+  const files: RunFileRef[] = []
   for (const entry of entries) {
-    if (entry.isFile() && entry.name.endsWith('.json')) byName.set(entry.name, join(root, entry.name))
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue
+    files.push({ name: entry.name, file: join(root, entry.name) })
   }
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !LEGACY_MONTH.test(entry.name)) continue
-    const directory = join(root, entry.name)
-    let names: string[]
-    try {
-      names = (await readdir(directory)).filter(name => name.endsWith('.json'))
-    } catch {
-      continue
-    }
-    for (const name of names) {
-      if (!byName.has(name)) byName.set(name, join(directory, name))
-    }
-  }
-  return [...byName.entries()]
-    .map(([name, file]) => ({ name, file }))
-    .sort((left, right) => right.name.localeCompare(left.name))
+  return files.sort((left, right) => right.name.localeCompare(left.name))
 }
 
 /** The file modification time, or undefined when it cannot be read. */
@@ -169,7 +147,7 @@ export interface RunQuery {
  * Read a task's newest runs, newest first.
  *
  * Run ids sort chronologically, so the walk can stop as soon as enough matching
- * records are collected. Legacy month files are included in the same ordering.
+ * records are collected.
  * @param taskFolder - absolute task directory.
  * @param query - limit, optional cursor, optional status filter.
  * @returns the records, newest first.
@@ -246,9 +224,8 @@ function startedAtFromRunId(runId: string): number | undefined {
  * Delete run records older than the retention window.
  *
  * Only expired files are removed. A file whose name cannot be parsed falls back
- * to its mtime, so hand-copied records are still eventually cleaned up. A
- * legacy month directory is removed once it is empty; the runs folder itself is
- * never removed.
+ * to its mtime, so hand-copied records are still eventually cleaned up. The runs
+ * folder itself is never removed.
  * @param taskFolder - absolute task directory.
  * @param retentionDays - keep this many days; <= 0 keeps everything.
  * @param now - current epoch milliseconds, injectable for tests.
@@ -275,23 +252,6 @@ export async function pruneRunRecords(
     const started = startedAtFromRunId(entry.name) ?? await mtimeOf(file)
     if (started === undefined || started >= cutoff) continue
     if (await removeFile(file)) removed += 1
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !LEGACY_MONTH.test(entry.name)) continue
-    const directory = join(root, entry.name)
-    let names: string[]
-    try {
-      names = (await readdir(directory)).filter(name => name.endsWith('.json'))
-    } catch {
-      continue
-    }
-    for (const name of names) {
-      const file = join(directory, name)
-      const started = startedAtFromRunId(name) ?? await mtimeOf(file)
-      if (started === undefined || started >= cutoff) continue
-      if (await removeFile(file)) removed += 1
-    }
-    await rmdir(directory).catch(() => {})
   }
   return removed
 }

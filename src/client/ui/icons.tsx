@@ -88,6 +88,16 @@ export function IconPlus() {
   return <StrokeIcon size={16}><path d="M12 5v14M5 12h14" /></StrokeIcon>
 }
 
+/** 任务仓库。 */
+export function IconInbox({ size = 16 }: IconProps) {
+  return (
+    <StrokeIcon size={size}>
+      <path d="M4 13h4l1.5 3h5l1.5-3h4" />
+      <path d="M5.5 4.5h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z" />
+    </StrokeIcon>
+  )
+}
+
 /** 机器人（「机器人管理」入口）。 */
 export function IconRobot({ size = 16 }: IconProps) {
   return (
@@ -111,8 +121,29 @@ export function IconSend({ size = 16 }: IconProps) {
   )
 }
 
-/** 侧栏入口：两个叠起来的消息气泡。 */
-export function PanelIcon({ size }: { size: number }) {
+/** 联系作者（对话气泡）。 */
+export function IconMessage({ size = 16 }: IconProps) {
+  return (
+    <StrokeIcon size={size}>
+      <path d="M20 12.5a7.5 7.5 0 0 1-10.9 6.7L4 20l1-4.6A7.5 7.5 0 1 1 20 12.5Z" />
+      <path d="M8.8 11.4h6.4M8.8 14.4h4.2" />
+    </StrokeIcon>
+  )
+}
+
+/** 公告（喇叭）。 */
+export function IconMegaphone({ size = 16 }: IconProps) {
+  return (
+    <StrokeIcon size={size}>
+      <path d="M4 10.4v3.2a1 1 0 0 0 1 1h2l4 3.1V6.3L7 9.4H5a1 1 0 0 0-1 1Z" />
+      <path d="M15 8.6a4.3 4.3 0 0 1 0 6.8" />
+      <path d="M17.9 6a7.9 7.9 0 0 1 0 12" />
+      <path d="M8 14.6V18a1 1 0 0 0 1 1h1.4" />
+    </StrokeIcon>
+  )
+}
+
+/** 侧栏入口：两个叠起来的消息气泡。 */export function PanelIcon({ size }: { size: number }) {
   return (
     <svg
       width={size}

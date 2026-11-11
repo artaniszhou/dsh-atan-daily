@@ -1,24 +1,23 @@
 /**
- * 设置路由：读取/修改工作目录，创建当前目录并注册 Workspace。
+ * 设置路由：读设置、选/清工作目录、改任务仓库地址。
  *
- * `workDir: null`（或空串）会真正清除已保存覆盖并回到默认目录；切换目录
- * 在运行中会被拒绝，避免运行摘要写到另一份注册表里。
+ * 目录切换的全部副作用（建目录、ensure 注册表、注册 Workspace、落盘、通知调度）
+ * 都在 `settings/hub` 的 `switchTo` / `clear` 里完成，路由只做校验与响应。
  */
 
-import { isAbsolute, join, normalize } from 'node:path'
+import { isAbsolute, normalize } from 'node:path'
 import { AppError } from '../errors.js'
+import { normalizeBaseUrl } from '../config.js'
 import type { Logger, RouteHandler } from '../ports.js'
 import type { Scheduler } from '../scheduling/scheduler.js'
 import type { SettingsDescriber } from '../settings/describe.js'
-import type { SettingsStore } from '../settings/store.js'
-import type { WorkspaceService } from '../settings/workspace.js'
+import type { SettingsPatch, WorkspaceHub } from '../settings/hub.js'
 import { answer, methodNotAllowed, readJsonBody } from './server.js'
 
 /** 设置路由依赖。 */
 export interface SettingsRoutesDeps {
-  settings: SettingsStore
+  hub: WorkspaceHub
   describer: SettingsDescriber
-  workspaces: WorkspaceService
   scheduler: Pick<Scheduler, 'refresh' | 'hasRunning'>
   logger: Logger
 }
@@ -32,30 +31,63 @@ export interface SettingsRoutes {
 /**
  * 校验 PATCH /settings 的 body。
  * @param payload - 请求体。
- * @returns 清除标记与目标路径（清除时为 undefined）。
+ * @returns 设置补丁；`null` 表示清除该项覆盖。
  */
-function readWorkDir(payload: unknown): { clear: boolean, path?: string } {
+function readPatch(payload: unknown): SettingsPatch {
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     throw new AppError('invalid_input', 400, 'request body must be an object')
   }
   const record = payload as Record<string, unknown>
-  if (!('workDir' in record)) {
-    throw new AppError('invalid_input', 400, 'workDir is required (use null to clear)')
+  const patch: SettingsPatch = {}
+  if ('workDir' in record) patch.workDir = readWorkDir(record['workDir'])
+  if ('serverBaseUrl' in record) patch.serverBaseUrl = readServerBaseUrl(record['serverBaseUrl'])
+  if (patch.workDir === undefined && patch.serverBaseUrl === undefined) {
+    throw new AppError('invalid_input', 400, 'workDir or serverBaseUrl is required')
   }
-  const value = record['workDir']
-  if (value === null) return { clear: true }
+  return patch
+}
+
+/**
+ * 校验工作目录值。
+ * @param value - 原始值；`null` 或空串表示清除覆盖。
+ * @returns 目标路径；清除时为 null。
+ */
+function readWorkDir(value: unknown): string | null {
+  if (value === null) return null
   if (typeof value !== 'string') {
     throw new AppError('invalid_input', 400, 'workDir must be a string or null')
   }
   const requested = value.trim()
-  if (requested === '') return { clear: true }
+  if (requested === '') return null
   if (requested.includes('\u0000')) throw new AppError('invalid_path', 400, 'invalid path')
-  return { clear: false, path: requested }
+  // 不再有「默认目录」可以做相对路径的基准，相对路径会被解析到进程 cwd。
+  if (!isAbsolute(requested)) {
+    throw new AppError('invalid_path', 400, 'workDir must be an absolute path')
+  }
+  return normalize(requested)
+}
+
+/**
+ * 校验任务仓库地址。
+ * @param value - 原始值；`null` 或空串表示清除覆盖。
+ * @returns 规范化后的地址；清除时为 null。
+ */
+function readServerBaseUrl(value: unknown): string | null {
+  if (value === null) return null
+  if (typeof value !== 'string') {
+    throw new AppError('invalid_input', 400, 'serverBaseUrl must be a string or null')
+  }
+  try {
+    const normalized = normalizeBaseUrl(value, 'serverBaseUrl')
+    return normalized === '' ? null : normalized
+  } catch (error: unknown) {
+    throw new AppError('invalid_input', 400, error instanceof Error ? error.message : String(error))
+  }
 }
 
 /**
  * 创建设置路由。
- * @param deps - 设置、读模型、Workspace 与调度器。
+ * @param deps - 工作区、读模型与调度器。
  * @returns 设置与创建目录处理器。
  */
 export function createSettingsRoutes(deps: SettingsRoutesDeps): SettingsRoutes {
@@ -66,38 +98,32 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): SettingsRoutes {
       return
     }
     if (method === 'PATCH') {
-      if (deps.scheduler.hasRunning()) {
+      const payload = await readJsonBody(request)
+      const patch = readPatch(payload)
+      // 只有改工作目录才和正在跑的任务冲突；改服务地址随时可以。
+      if (patch.workDir !== undefined && patch.workDir !== null && deps.scheduler.hasRunning()) {
         throw new AppError('conflict', 409, 'cannot change the working directory while runs are in progress')
       }
-      const payload = await readJsonBody(request)
-      const requested = readWorkDir(payload)
-      if (requested.clear) {
-        // Clearing never creates the default directory: the page then shows
-        // 「创建工作目录」 instead of silently creating it on a settings write.
-        await deps.settings.save({ workDir: null })
+      if (patch.workDir === null) {
+        // 清除覆盖：回到「未配置」态，不创建任何目录。
+        await deps.hub.clear()
         await deps.scheduler.refresh()
         answer(response, 200, { ok: true, ...await deps.describer.describe() })
         return
       }
-      // A relative path resolves against the default root, so a short value
-      // typed on the page still names a directory the plugin owns.
-      const target = isAbsolute(requested.path ?? '')
-        ? normalize(requested.path ?? '')
-        : join(deps.settings.defaultWorkDir, requested.path ?? '')
-      let workspaceError: string | undefined
-      try {
-        const prepared = await deps.workspaces.prepare(target)
-        workspaceError = prepared.workspaceError
-      } catch (error: unknown) {
-        throw new AppError('invalid_path', 400, `cannot use that directory: ${error instanceof Error ? error.message : String(error)}`)
+      if (patch.workDir !== undefined) {
+        const prepared = await deps.hub.switchTo(patch.workDir)
+        if (patch.serverBaseUrl !== undefined) await deps.hub.saveServerBaseUrl(patch.serverBaseUrl)
+        await deps.scheduler.refresh()
+        answer(response, 200, {
+          ok: true,
+          ...prepared.workspaceError === undefined ? {} : { workspaceError: prepared.workspaceError },
+          ...await deps.describer.describe(),
+        })
+        return
       }
-      await deps.settings.save({ workDir: target })
-      await deps.scheduler.refresh()
-      answer(response, 200, {
-        ok: true,
-        ...workspaceError === undefined ? {} : { workspaceError },
-        ...await deps.describer.describe(),
-      })
+      await deps.hub.saveServerBaseUrl(patch.serverBaseUrl ?? null)
+      answer(response, 200, { ok: true, ...await deps.describer.describe() })
       return
     }
     methodNotAllowed(response, method)
@@ -109,17 +135,13 @@ export function createSettingsRoutes(deps: SettingsRoutesDeps): SettingsRoutes {
       methodNotAllowed(response, method)
       return
     }
-    let workspaceError: string | undefined
-    try {
-      const prepared = await deps.workspaces.prepare(deps.settings.workDir())
-      workspaceError = prepared.workspaceError
-    } catch (error: unknown) {
-      throw new AppError('invalid_path', 400, `cannot create the directory: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    // 没有工作目录就没有「当前目录」可创建；页面应先选择目录。
+    deps.hub.require()
+    const prepared = await deps.hub.ensure()
     await deps.scheduler.refresh()
     answer(response, 200, {
       ok: true,
-      ...workspaceError === undefined ? {} : { workspaceError },
+      ...prepared.workspaceError === undefined ? {} : { workspaceError: prepared.workspaceError },
       ...await deps.describer.describe(),
     })
   }
