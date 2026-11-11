@@ -6,31 +6,6 @@
 >
 > 只在 npm 发布过的版本才单独成节。1.1.0 之后的开发期用过 1.3.0 / 1.4.0 / 2.x 等内部编号，均未发布，已并入 1.2.0。
 
-## 未发布
-
-**新增**
-
-- **「选择工作区」弹窗**：从已注册的 DSH 工作区里选，搜索框匹配标题与路径，`↑↓` / `Enter` 可用；列表默认只显示 atan-daily 用过的工作区（目录下有 `.task/`），当前工作区始终显示，可勾选「显示全部工作区」。
-- **用目录地址新建工作区**：同一个弹窗里输入绝对路径，Host 按**宿主平台**（Windows / macOS / Linux）校验并给出稳定错误码；目录不存在时创建，然后注册为工作区。注册失败即切换失败，不再出现「已保存但注册失败」。
-- **默认工作区**：建议值改为 `DSH 默认工作区父目录/atan-daily`（如 `<Documents>/deepseek-harness/atan-daily`）；优先从注册表里的 `default-workspace` 推导（尊重 `documentsDirectory`），其次探测系统 Documents，最后回退 `~/DSH/atan-daily`。仍然要点「使用建议工作区」才创建。
-- **「工作区已失效」态**：保存的目录不再是已注册工作区时，页面提示并可「重新注册」；重新注册前 Host 拒绝新建任务与运行（读任务列表仍可用）。
-- **纯函数路径校验**：`src/host/settings/paths.ts`，按平台检查完全限定、设备路径、非法字符、保留名、结尾空格/点、分段与总长度、设置目录保护。
-
-**变更**
-
-- **「联系作者」改跳官网**：按钮从打开仓库里的 `docs/CONTACT.md` 改为打开 [官网主页](https://atandaily.cn/)（QQ 群在「如何联系」一节，群号不变）；GitHub 上的 `CONTACT.md` 保留，供直接看仓库的人使用。
-- **术语**：工作目录 → **工作区**；选择目录 → **选择工作区**；使用建议目录 → **使用建议工作区**；创建工作目录 → **创建工作区**。页面、工具报错与文档同步。
-- **工作区 = DSH 工作区**：插件不再调用宿主目录选择器（`pickDirectory`），从根上避免 native / browse 组合差异；42 这类远程宿主与本地宿主走同一套弹窗。
-- **设置行只显示工作区标题**：路径不再内联；悬停标题看完整路径，点击标题复制路径并短暂提示「已复制」。
-- **注册语义收紧**：`switchTo` 在注册工作区失败时直接失败，`settings.json` 与当前工作区保持不变。
-- **canonical 路径**：保存与注册都用 `realpath` 后的路径，避免符号链接被重复注册成两个工作区。
-- **设置视图新增字段**：`hostPlatform`、`pathSeparator`、`defaultWorkspaceParent`、`suggestedWorkDirSource`、`workspaceState`；新增 `GET atan-daily/workspaces` 与 `POST atan-daily/settings/check`。
-
-**兼容**
-
-- `settings.json` 结构不变（仍存 `workDir`），已有用户的路径与数据不迁移、不改动。
-- `SettingsView.workspaceError` 保留给旧 Client；新路径不再产生它。
-
 ## 1.2.0（2026-11-11）
 
 **新增**
@@ -50,6 +25,11 @@
 - **插件内粗粒度工具**：`atan_daily_task_context` / `_task_manifest` / `_collect` / `_build_report` / `_render` / `_script` / `_report_tune`，命令、校验、渲染与草稿都在同进程完成，不再让模型手算 hash 或现写校验脚本。
 - **任务仓库地址可在页面配置**：设置区「工作目录」下方新增一行，保存进 `settings.json` 并覆盖 `cordis.patch.yml` 的 `serverBaseUrl`，立即生效、无需重启；留空回默认。
 - **页面公告**：标题下方的固定说明改为公告位（默认一行标题、可展开正文），接口关闭或失败时整块不渲染；Host 新增 `GET atan-daily/announcement` 代理，`atan-admin-web` 新增公告管理页，`atan-admin-server` 新增公告接口与 `atan_announcement` 集合。
+- **「选择工作区」弹窗**：从已注册的 DSH 工作区里选，搜索框匹配标题与路径，`↑↓` / `Enter` 可用；列表默认只显示 atan-daily 用过的工作区（目录下有 `.task/`），当前工作区始终显示，可勾选「显示全部工作区」。
+- **用目录地址新建工作区**：同一个弹窗里输入绝对路径，Host 按**宿主平台**（Windows / macOS / Linux）校验并给出稳定错误码；目录不存在时创建，然后注册为工作区。注册失败即切换失败，不再出现「已保存但注册失败」。
+- **默认工作区**：建议值改为 `DSH 默认工作区父目录/atan-daily`（如 `<Documents>/deepseek-harness/atan-daily`）；优先从注册表里的 `default-workspace` 推导（尊重 `documentsDirectory`），其次探测系统 Documents，最后回退 `~/DSH/atan-daily`。仍然要点「使用建议工作区」才创建。
+- **「工作区已失效」态**：保存的目录不再是已注册工作区时，页面提示并可「重新注册」；重新注册前 Host 拒绝新建任务与运行（读任务列表仍可用）。
+- **纯函数路径校验**：`src/host/settings/paths.ts`，按平台检查完全限定、设备路径、非法字符、保留名、结尾空格/点、分段与总长度、设置目录保护。
 
 **变更**
 
@@ -66,6 +46,13 @@
 - **展示修改一律先预览后落盘**：改展示只能走 `atan_daily_report_tune`，Host 侧不再有绕过草稿直接写 `.share` 的接口。
 - **工作目录不再有默认值**：`settings.json` 没有 `workDir` 时进入未配置态——页面显示「未选择」，提供「使用建议目录」（Windows `文档\DSH\atan-daily`，macOS `~/DSH/atan-daily`）与「选择目录」；只有点了才创建目录、注册 Workspace、写 `settings.json`。未配置期间任务列表为空、新建任务与任务仓库按钮禁用、`atan_daily_*` 工具返回「先选择工作目录」。老用户由一次性迁移兜住：没有 `workDir` 但历史默认目录里有任务时自动沿用并写回。yaml 的 `dataDir` 降级为「建议目录」，不再作为自动生效的默认值；工作目录必须是绝对路径。
 - **设置层拆分**：`SettingsStore` 拆成 `SettingsFile`（只读写 `settings.json`）与 `WorkspaceHub`（当前工作区状态机）。工作区以不可变快照 `{ root, store }` 交给消费方，任务、会话、运行记录、路由与调度都只依赖 `current()/require()`，不再成对传 `store` + `workDir`；目录切换的副作用（建目录、注册 Workspace、落盘、通知）统一在 `switchTo` 内完成，调度器订阅变更自行刷新。
+- **「联系作者」改跳官网**：按钮从打开仓库里的 `docs/CONTACT.md` 改为打开 [官网主页](https://atandaily.cn/)（QQ 群在「如何联系」一节，群号不变）；GitHub 上的 `CONTACT.md` 保留，供直接看仓库的人使用。
+- **术语**：工作目录 → **工作区**；选择目录 → **选择工作区**；使用建议目录 → **使用建议工作区**；创建工作目录 → **创建工作区**。页面、工具报错与文档同步。
+- **工作区 = DSH 工作区**：插件不再调用宿主目录选择器（`pickDirectory`），从根上避免 native / browse 组合差异；42 这类远程宿主与本地宿主走同一套弹窗。
+- **设置行只显示工作区标题**：路径不再内联；悬停标题看完整路径，点击标题复制路径并短暂提示「已复制」。
+- **注册语义收紧**：`switchTo` 在注册工作区失败时直接失败，`settings.json` 与当前工作区保持不变。
+- **canonical 路径**：保存与注册都用 `realpath` 后的路径，避免符号链接被重复注册成两个工作区。
+- **设置视图新增字段**：`hostPlatform`、`pathSeparator`、`defaultWorkspaceParent`、`suggestedWorkDirSource`、`workspaceState`；新增 `GET atan-daily/workspaces` 与 `POST atan-daily/settings/check`。
 
 **修复**
 
@@ -85,6 +72,8 @@
 - 只接受任务包 v2：旧 v1 包直接拒绝；旧任务目录里的 `.meta/charts/` 不再读取，需要时手工移到 `.share/charts/`。
 - `.meta/task.json` 与 `.meta/index.md` 不再读取；已有任务需要手工改成 `.meta/task-pipeline.json`（内容不变）。
 - 不兼容 v1 契约：没有 `x-blocks` 的契约判无效并提示重建；存量任务下一轮按 skill 的建契约定式重建，`x-revision + 1`。
+- `settings.json` 结构不变（仍存 `workDir`），已有用户的路径与数据不迁移、不改动。
+- `SettingsView.workspaceError` 保留给旧 Client；新路径不再产生它。
 
 **移除**
 
