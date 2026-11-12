@@ -6,7 +6,14 @@
  */
 
 import { AppError, appErrorOf, errorBodyOf } from '../errors.js'
-import type { Logger, RouteHandler, RouteRequest, RouteResponse } from '../ports.js'
+import type {
+  ConnectionPort,
+  Logger,
+  RequestRejection,
+  RouteHandler,
+  RouteRequest,
+  RouteResponse,
+} from '../ports.js'
 
 /** 单次请求体上限。 */
 const MAX_BODY_BYTES = 22 * 1024 * 1024
@@ -85,6 +92,53 @@ export function guard(handler: RouteHandler, logger: Logger): RouteHandler {
     } catch (error: unknown) {
       answerError(response, error, logger)
     }
+  }
+}
+
+/**
+ * 准入闸门：先问宿主的 `connection` 服务这次请求能不能进。
+ *
+ * 拿不到服务、或它抛错时一律按 403 拒绝——宁可拒绝，也不退回到插件自己拼
+ * 的 Host / Origin 判定。`connection.requestRejection` 只看浏览器标记与部署
+ * 的 `trustedHosts`，本机页面自己发的请求照常通过。
+ * @param handler - 业务处理器。
+ * @param connection - 宿主的连接信任服务；缺失时拒绝全部请求。
+ * @param logger - 诊断日志。
+ * @returns 带准入判定的路由处理器。
+ */
+export function fence(
+  handler: RouteHandler,
+  connection: ConnectionPort | undefined,
+  logger: Logger,
+): RouteHandler {
+  return async (request, response) => {
+    const rejection = rejectionOf(connection, request, logger)
+    if (rejection !== undefined) {
+      const reason = rejection === 401 ? 'unauthorized' : 'forbidden'
+      answer(response, rejection, { ok: false, code: reason, error: reason })
+      return
+    }
+    await handler(request, response)
+  }
+}
+
+/**
+ * 取一次准入结论：服务缺失或抛错都算 403。
+ * @param connection - 宿主的连接信任服务。
+ * @param request - 待判定的请求。
+ * @param logger - 诊断日志。
+ * @returns 401 / 403 / undefined。
+ */
+function rejectionOf(
+  connection: ConnectionPort | undefined,
+  request: RouteRequest,
+  logger: Logger,
+): RequestRejection {
+  try {
+    return connection?.requestRejection({ headers: request.headers })
+  } catch (error) {
+    logger.warn(`admission check failed: ${String(error)}`)
+    return 403
   }
 }
 

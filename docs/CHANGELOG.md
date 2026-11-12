@@ -6,6 +6,17 @@
 >
 > 只在 npm 发布过的版本才单独成节。1.1.0 之后的开发期用过 1.3.0 / 1.4.0 / 2.x 等内部编号，均未发布，已并入 1.2.0。
 
+## 1.2.1（2026-11-12）
+
+**安全**
+
+- **本地接口补上准入判定**：`/atan-daily/*`、`/atan-daily/settings*`、`/atan-daily/workspaces`、`/atan-daily/task-hub`、`/atan-daily/announcement`、`/api/atan-daily/im` 这些路由现在先问宿主的 `connection.requestRejection(request)`；返回 401 / 403 直接拒绝，拿不到该服务或判定抛错也按 403 处理。此前这些接口对任意网页发起的跨站请求都放行，可被用来建任务、改设置或上传任务包。
+- 判定只看宿主记的 Host / Origin / Sec-Fetch-Site 与部署的 `trustedHosts`，本机页面（以及用 `--trusted-host` 声明过的地址）照常使用，不需要改任何配置。
+
+**兼容**
+
+- 需要宿主提供 `connection` 服务（DSH 0.2.x 自带）。宿主没有这个服务时，上述路由不会被注册；定时执行、报告渲染、飞书推送不经过这些路由，仍然照常工作。
+
 ## 1.2.0（2026-11-11）
 
 **新增**

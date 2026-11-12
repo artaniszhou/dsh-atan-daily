@@ -26,6 +26,7 @@ import type {
   Logger,
   ModelPort,
   PermissionPresetPort,
+  RouteHandler,
   SessionPort,
   SkillPort,
   TimerPort,
@@ -64,6 +65,7 @@ import { HOST_IM_ROUTE, HOST_ROUTES, type TaskRecord } from '../protocol.js'
 import type { TaskMetaPatch } from '../core/task-list.js'
 import {
   answer,
+  fence,
   guard,
   methodNotAllowed,
   pathnameOf,
@@ -397,10 +399,18 @@ export async function apply(ctx: HostContext, config?: Config): Promise<void> {
   const workspaceRoutes = createWorkspaceRoutes({ hub, workspaces })
   const botRoutes = createBotRoutes(bots)
 
-  ctx.inject(['webServer'], (scope) => {
+  ctx.inject(['connection', 'webServer'], (scope) => {
     scope.effect(() => {
-      const collection = guard(taskRoutes.collection, logger)
-      const item = guard((request, response) => {
+      /**
+       * 每条路由都先过宿主的连接信任判定，再做业务处理。
+       *
+       * 浏览器里的任意网页都能向本机端口发跨站请求，读文件、改设置、建任务
+       * 这类接口必须先拒掉外来请求；判定归宿主的 `connection` 服务，
+       * 插件只负责「拿不到判定就拒绝」。
+       */
+      const admit = (handler: RouteHandler): RouteHandler => fence(handler, scope.connection, logger)
+      const collection = admit(guard(taskRoutes.collection, logger))
+      const item = admit(guard((request, response) => {
         const method = request.method ?? 'GET'
         if (method !== 'GET' && method !== 'POST' && method !== 'PATCH' && method !== 'DELETE') {
           methodNotAllowed(response, method)
@@ -414,17 +424,17 @@ export async function apply(ctx: HostContext, config?: Config): Promise<void> {
           return
         }
         return taskRoutes.item(request, response, parsed.taskId, parsed.action)
-      }, logger)
+      }, logger))
       const disposers: Array<() => void> = [
         scope.webServer.register({ kind: 'exact', path: ROUTE, handler: collection }),
-        scope.webServer.register({ kind: 'exact', path: SETTINGS_ROUTE, handler: guard(settingsRoutes.settings, logger) }),
-        scope.webServer.register({ kind: 'exact', path: `${SETTINGS_ROUTE}/check`, handler: guard(settingsRoutes.check, logger) }),
-        scope.webServer.register({ kind: 'exact', path: `${SETTINGS_ROUTE}/directory`, handler: guard(settingsRoutes.directory, logger) }),
-        scope.webServer.register({ kind: 'exact', path: HOST_ROUTES.workspaces, handler: guard(workspaceRoutes.list, logger) }),
+        scope.webServer.register({ kind: 'exact', path: SETTINGS_ROUTE, handler: admit(guard(settingsRoutes.settings, logger)) }),
+        scope.webServer.register({ kind: 'exact', path: `${SETTINGS_ROUTE}/check`, handler: admit(guard(settingsRoutes.check, logger)) }),
+        scope.webServer.register({ kind: 'exact', path: `${SETTINGS_ROUTE}/directory`, handler: admit(guard(settingsRoutes.directory, logger)) }),
+        scope.webServer.register({ kind: 'exact', path: HOST_ROUTES.workspaces, handler: admit(guard(workspaceRoutes.list, logger)) }),
         scope.webServer.register({ kind: 'prefix', path: ROUTE, handler: item }),
-        scope.webServer.register({ kind: 'prefix', path: HOST_ROUTES.taskHub, handler: guard(taskHub, logger) }),
-        scope.webServer.register({ kind: 'exact', path: HOST_ROUTES.announcement, handler: guard(announcement.handler, logger) }),
-        scope.webServer.register({ kind: 'prefix', path: HOST_IM_ROUTE, handler: guard(botRoutes.handler, logger) }),
+        scope.webServer.register({ kind: 'prefix', path: HOST_ROUTES.taskHub, handler: admit(guard(taskHub, logger)) }),
+        scope.webServer.register({ kind: 'exact', path: HOST_ROUTES.announcement, handler: admit(guard(announcement.handler, logger)) }),
+        scope.webServer.register({ kind: 'prefix', path: HOST_IM_ROUTE, handler: admit(guard(botRoutes.handler, logger)) }),
       ]
       return () => {
         for (const dispose of disposers) dispose()

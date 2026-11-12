@@ -27,10 +27,30 @@ export interface Logger {
   run(entry: RunLogEntry): void
 }
 
+/** 请求头：Node 的普通对象或 `Headers`，与宿主 `connection` 服务同形。 */
+export type RouteHeaders =
+  | Headers
+  | Readonly<Record<string, string | readonly string[] | undefined>>
+
+/** 宿主对一次请求的准入结论：401 / 403 表示拒绝，`undefined` 表示放行。 */
+export type RequestRejection = 401 | 403 | undefined
+
+/**
+ * 宿主的连接信任服务（`connection`）。
+ *
+ * 浏览器里的任意网页都能向本机端口发跨站请求，插件路由必须先问它一次；
+ * 判定用的是 Host / Origin / Sec-Fetch-Site 与部署的 `trustedHosts`。
+ */
+export interface ConnectionPort {
+  requestRejection: (request: { headers: RouteHeaders }) => RequestRejection
+}
+
 /** 路由消费的 Node 请求面。 */
 export interface RouteRequest extends AsyncIterable<Uint8Array> {
   method?: string
   url?: string
+  /** 原始请求头，原样交给宿主的准入判定，插件不自行解释。 */
+  headers: RouteHeaders
 }
 
 /** 路由写出的 Node 响应面。 */
@@ -175,6 +195,8 @@ export interface WebServerPort {
 export interface WebScope {
   webServer: WebServerPort
   effect: (callback: () => () => void, label?: string) => void
+  /** 宿主的连接信任服务；旧宿主可能没有，缺失时按拒绝处理。 */
+  connection?: ConnectionPort
 }
 
 /** 本文件也再导出 WorkspaceRef，消费者只需认端口层。 */
