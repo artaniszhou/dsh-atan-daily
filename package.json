@@ -1,6 +1,6 @@
 {
   "name": "dsh-atan-daily",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "DeepSeek Harness plugin: scheduled collection tasks that each file a timestamped report.",
   "keywords": [
     "dsh",

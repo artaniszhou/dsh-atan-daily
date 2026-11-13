@@ -6,7 +6,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir, readFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { defineTool } from './define.js'
@@ -43,10 +43,14 @@ function clip(text: string, max = 8000): string {
   return text.length <= max ? text : `${text.slice(0, max)}\n…（截断 ${String(text.length - max)} 字）`
 }
 
-/** 跑一条命令。 */
-function runCommand(command: string, cwd: string, timeoutMs: number): Promise<CommandResult> {
+/**
+ * 收集子进程输出，等它结束或超时。
+ * @param child - 已启动的子进程。
+ * @param timeoutMs - 超时毫秒。
+ * @returns 退出码与输出。
+ */
+function collect(child: ChildProcess, timeoutMs: number): Promise<CommandResult> {
   return new Promise((resolve) => {
-    const child = spawn(command, { cwd, shell: true, windowsHide: true })
     let stdout = ''
     let stderr = ''
     let timedOut = false
@@ -65,6 +69,28 @@ function runCommand(command: string, cwd: string, timeoutMs: number): Promise<Co
       resolve({ code: code ?? 1, stdout, stderr, timedOut })
     })
   })
+}
+
+/** 跑一条 shell 命令（只给 task-pipeline.json 里声明的 fetch/build 用）。 */
+function runCommand(command: string, cwd: string, timeoutMs: number): Promise<CommandResult> {
+  return collect(spawn(command, { cwd, shell: true, windowsHide: true }), timeoutMs)
+}
+
+/**
+ * 跑一个可执行文件，参数按数组逐个传入，不经过 shell。
+ * @param file - 可执行文件（`python` / `node`）。
+ * @param argv - 参数数组；每个元素原样作为 argv 传给子进程。
+ * @param cwd - 工作目录。
+ * @param timeoutMs - 超时毫秒。
+ * @returns 退出码与输出。
+ */
+function runFile(
+  file: string,
+  argv: readonly string[],
+  cwd: string,
+  timeoutMs: number,
+): Promise<CommandResult> {
+  return collect(spawn(file, [...argv], { cwd, shell: false, windowsHide: true }), timeoutMs)
 }
 
 /** 渲染工具结果。 */
@@ -447,30 +473,36 @@ export function registerAtanTools(ctx: ToolContext, deps: ToolDeps): void {
   function toolScript() {
     return defineToolLike({
       name: 'atan_daily_script',
-      description: '执行 .meta/script/ 下的单个脚本（python/node），捕获输出。一次性探测用；不经过 shell 拼接任意命令。',
+      description: '执行 .meta/script/ 下已登记的单个脚本（python/node），捕获输出。参数按字符串数组逐个传给脚本，不经过 shell。',
       parameters: {
         task: { type: 'string', required: true, description: '任务 id 或任务名称' },
         script: { type: 'string', required: true, description: '脚本相对路径，如 .meta/script/probe.py，或 scripts/ 下的文件名' },
-        args: { type: 'string', description: '附加参数（原样拼接，调用方负责引号）' },
+        args: { type: 'array', items: 'string', description: '附加参数，按数组逐个传给脚本（不经过 shell，不会被解释成命令）' },
         timeoutMs: { type: 'number', description: '超时毫秒，默认 120000' },
-        allowUnregistered: { type: 'boolean', description: '允许运行未登记在 task-pipeline.json 的脚本' },
       },
-      async execute(args: { task: string, script: string, args?: string, timeoutMs?: number, allowUnregistered?: boolean }) {
+      async execute(args: { task: string, script: string, args?: string[], timeoutMs?: number }) {
         const task = await resolveTask(repository, args.task)
         if (task === undefined) return fail('not_found', `找不到任务：${args.task}`)
+        if (args.args !== undefined && !Array.isArray(args.args)) {
+          return fail('invalid_input', 'args 必须是字符串数组')
+        }
         const relative = args.script.startsWith('.meta/script/') ? args.script : `.meta/script/${args.script}`
         if (relative.includes('..') || !/\.(py|mjs|js)$/u.test(relative)) {
           return fail('invalid_script', `只允许 .meta/script/ 下的 .py/.mjs/.js：${relative}`)
         }
         if (!await fileExists(join(task.folder, relative))) return fail('not_found', `脚本不存在：${relative}`)
-        if (args.allowUnregistered !== true) {
-          const state = await readManifest(task.folder)
-          const registered = state.manifest?.scripts.some(item => item.path === relative) === true
-          if (!registered) return fail('script_not_registered', '脚本未登记；先 upsert_script，或传 allowUnregistered: true', { script: relative })
+        const state = await readManifest(task.folder)
+        const registered = state.manifest?.scripts.some(item => item.path === relative) === true
+        if (!registered) {
+          return fail('script_not_registered', '脚本未登记；先用 atan_daily_task_manifest 的 upsert_script 登记', { script: relative })
         }
         const runner = relative.endsWith('.py') ? 'python' : 'node'
-        const command = `${runner} "${join(task.folder, relative)}" ${args.args ?? ''}`.trim()
-        const result = await runCommand(command, task.folder, args.timeoutMs ?? 120000)
+        const result = await runFile(
+          runner,
+          [join(task.folder, relative), ...(args.args ?? [])],
+          task.folder,
+          args.timeoutMs ?? 120000,
+        )
         if (result.code !== 0) {
           return fail('script_failed', `脚本退出码 ${String(result.code)}`, {
             script: relative,
@@ -482,11 +514,11 @@ export function registerAtanTools(ctx: ToolContext, deps: ToolDeps): void {
         }
         return ok({
           script: relative,
+          args: args.args ?? [],
           code: result.code,
           timedOut: result.timedOut,
           stdout: clip(result.stdout),
           stderr: clip(result.stderr),
-          registered: args.allowUnregistered !== true,
         })
       },
     })

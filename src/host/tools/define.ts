@@ -8,7 +8,9 @@
 
 /** 简单参数声明。 */
 interface ParameterSpec {
-  type: 'string' | 'number' | 'boolean'
+  type: 'string' | 'number' | 'boolean' | 'array'
+  /** 数组元素类型；当前只支持字符串数组。 */
+  items?: 'string'
   required?: boolean
   description?: string
   enum?: string[]
@@ -54,6 +56,7 @@ export function defineTool(spec: ToolSpec): ToolDefinition {
   for (const [key, parameter] of Object.entries(spec.parameters ?? {})) {
     properties[key] = {
       type: parameter.type,
+      ...parameter.type === 'array' ? { items: { type: parameter.items ?? 'string' } } : {},
       ...parameter.description === undefined ? {} : { description: parameter.description },
       ...parameter.enum === undefined ? {} : { enum: parameter.enum },
     }
@@ -82,6 +85,12 @@ export function defineTool(spec: ToolSpec): ToolDefinition {
         if (parameter.type === 'string' && typeof value !== 'string') throw new Error(`参数 ${key} 必须是字符串`)
         if (parameter.type === 'number' && typeof value !== 'number') throw new Error(`参数 ${key} 必须是数字`)
         if (parameter.type === 'boolean' && typeof value !== 'boolean') throw new Error(`参数 ${key} 必须是布尔值`)
+        if (parameter.type === 'array') {
+          if (!Array.isArray(value)) throw new Error(`参数 ${key} 必须是字符串数组`)
+          for (const item of value) {
+            if (typeof item !== 'string') throw new Error(`参数 ${key} 的元素必须是字符串`)
+          }
+        }
         if (parameter.enum !== undefined && typeof value === 'string' && !parameter.enum.includes(value)) {
           throw new Error(`参数 ${key} 只能是：${parameter.enum.join(' / ')}`)
         }

@@ -6,6 +6,18 @@
 >
 > 只在 npm 发布过的版本才单独成节。1.1.0 之后的开发期用过 1.3.0 / 1.4.0 / 2.x 等内部编号，均未发布，已并入 1.2.0。
 
+## 1.2.2（2026-11-13）
+
+**安全**
+
+- **`atan_daily_script` 不再经 shell 执行**：参数由字符串改为字符串数组，按 argv 逐个传给 `python` / `node`（`shell: false`），不再拼进命令行。此前 `args` 原样拼进 `shell: true` 的命令串，一个参数就能被解释成另一条命令。
+- **移除 `allowUnregistered`**：工具现在只执行 `.meta/task-pipeline.json` 里已登记的脚本；未登记时返回 `script_not_registered`，需先 `upsert_script`。此前该开关可跳过登记检查，等于任意脚本都能跑。
+
+**变更**
+
+- `atan_daily_script` 的 `args` 参数类型从字符串改为字符串数组；旧写法（字符串）会返回 `invalid_input`，请改成 `["--x=1", "a b"]` 这样的数组。
+- README 增补「安全与权限」一节，说明脚本参数不经过 shell、pipeline 命令的执行方式，以及本地接口的准入判定。
+
 ## 1.2.1（2026-11-12）
 
 **安全**

@@ -21,7 +21,7 @@ description: 阿碳日报任务的共用执行规则：调用 atan_daily_* 工�
 | `atan_daily_collect` | 按清单执行取数 |
 | `atan_daily_build_report` | 按清单组装 report.json 并校验 |
 | `atan_daily_render` | 手动重渲染最终 PNG/PDF；执行轮次默认不调用（见 §4） |
-| `atan_daily_script` | 运行 `.meta/script/` 下的单个脚本（一次性探测） |
+| `atan_daily_script` | 运行 `.meta/script/` 下已登记的单个脚本（一次性探测）；参数用字符串数组传，不经 shell |
 | `atan_daily_report_tune` | 聊天里改展示/图型（草稿 → 预览 → commit） |
 
 工具不可用时，才回退到本文的「手动路径」，并保持同样的结构与校验。

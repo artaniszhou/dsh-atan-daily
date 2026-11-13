@@ -18,7 +18,7 @@
 
 > 阿碳日报是社区维护的 DeepSeek Harness（DSH）插件，并非 DeepSeek AI 官方产品。
 
-当前版本 **1.2.1**。本页只讲功能概览与安装；其余内容见：
+当前版本 **1.2.2**。本页只讲功能概览与安装；其余内容见：
 
 | 文档 | 内容 |
 | --- | --- |
@@ -85,6 +85,13 @@ dsh plugin --profile web add .
 > 仓库不包含构建产物 `lib/`，克隆后必须先执行 `npm run build`。因此本插件不支持直接用 Git 地址安装，请使用 npm 包，或构建后按上面的本地目录方式安装。
 
 > 若你之前用本地 `link:` 装过旧包名 `@artanis/atan-daily`，请先用 `dsh plugin --profile web remove @artanis/atan-daily` 移除，避免同一个插件 id 出现两次。
+
+## 安全与权限
+
+- `atan_daily_script` 只执行 `.meta/script/` 下已在 `task-pipeline.json` 登记的脚本；参数以字符串数组逐个传给 `python` / `node`，不经过 shell。
+- `task-pipeline.json` 里的取数与组装命令（`pipeline.fetch`、`pipeline.build`）本身就是 shell 命令，按清单原样执行，权限等于 DSH 进程本身；改这两条命令等同于改这个任务的取数与渲染逻辑，运行前请在任务目录里看清内容。
+- 插件自己的本地接口（`/atan-daily/*`、`/api/atan-daily/im`）先经宿主的 `connection.requestRejection` 准入，只接受本机页面（或 `--trusted-host` 声明过的地址）发起的已认证请求。
+- 报告 HTML 渲染时数据全量转义；自定义图形脚本在受限子进程里运行（禁代码生成、空环境变量、临时目录），输出的 SVG 会再消毒。
 
 ## 反馈与贡献
 
